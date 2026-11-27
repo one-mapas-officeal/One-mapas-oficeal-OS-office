@@ -5,8 +5,8 @@
   "nome": "onemapas-os-0.1.0-beta-amd64.iso",
   "arquitetura": "amd64",
   "base": "Debian 12 (bookworm)",
-  "status": "construindo: instalando pacotes, interface e drivers de rede",
-  "progresso": 82,
+  "status": "falhou (veja o log do build)",
+  "progresso": 70,
   "etapas": [
     {
       "nome": "Interface Windows / Mint / Mac",
