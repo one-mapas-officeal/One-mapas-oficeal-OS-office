@@ -42,8 +42,8 @@
   "download": null,
   "pasta": "ISO/beta/0.3.0",
   "nome": "onemapas-os-0.3.0-beta-amd64.iso",
-  "status": "baixando o firmware de rede",
-  "progresso": 82,
+  "status": "gerando a imagem ISO",
+  "progresso": 90,
   "data": "2026-11-27",
   "build": "https://github.com/one-mapas-officeal/One-mapas-oficeal-OS-office/actions/runs/45998564300"
 }
