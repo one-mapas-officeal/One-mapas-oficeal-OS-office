@@ -6,6 +6,7 @@ xinit
 lightdm
 openbox
 unclutter
+xterm
 chromium
 fonts-noto
 fonts-noto-color-emoji
@@ -13,8 +14,8 @@ xdg-user-dirs
 xdg-utils
 pcmanfm
 mousepad
-# --- backend OneMapas ---
-python3
+# --- utilitários ---
+
 git
 curl
 ca-certificates

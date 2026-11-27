@@ -2,7 +2,12 @@
   "projeto": "OneMapas OS",
   "descricao": "Índice das ISOs do OneMapas OS. Cada ISO fica em ISO/<canal>/<versão>/.",
   "atualizado_em": "2026-11-27T00:00:00Z",
-  "canais": ["alpha", "beta", "em-testes", "estavel"],
+  "canais": [
+    "alpha",
+    "beta",
+    "em-testes",
+    "estavel"
+  ],
   "ultima": {
     "canal": "beta",
     "versao": "0.1.0",
@@ -17,14 +22,36 @@
       "arquitetura": "amd64",
       "base": "Debian 12 (bookworm)",
       "status": "aguardando build",
-      "progresso": 60,
+      "progresso": 70,
       "etapas": [
-        { "nome": "Interface gráfica (Windows / Mint / Mac)", "feito": true },
-        { "nome": "Criador de sites + verificação de URL", "feito": true },
-        { "nome": "Drivers e firmware de rede", "feito": true },
-        { "nome": "Configuração do live-build", "feito": true },
-        { "nome": "Build da ISO no GitHub Actions", "feito": false },
-        { "nome": "Testes em PC real", "feito": false }
+        {
+          "nome": "Servidor web (Render) + interface Windows / Mint / Mac",
+          "feito": true
+        },
+        {
+          "nome": "Criador de sites + verificação de URL",
+          "feito": true
+        },
+        {
+          "nome": "Área de Trabalho virtual + editor",
+          "feito": true
+        },
+        {
+          "nome": "Drivers e firmware de rede",
+          "feito": true
+        },
+        {
+          "nome": "Configuração do live-build (abre o servidor web)",
+          "feito": true
+        },
+        {
+          "nome": "Build da ISO no GitHub Actions",
+          "feito": false
+        },
+        {
+          "nome": "Testes em PC real",
+          "feito": false
+        }
       ],
       "tamanho_mb": null,
       "sha256": null,

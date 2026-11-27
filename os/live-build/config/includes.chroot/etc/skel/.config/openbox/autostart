@@ -1,4 +1,4 @@
-# OneMapas OS: inicia o backend local e abre a interface em tela cheia
+# OneMapas OS: abre o servidor web em tela cheia
 xset s off; xset -dpms; xset s noblank
 unclutter -idle 5 &
 xdg-user-dirs-update

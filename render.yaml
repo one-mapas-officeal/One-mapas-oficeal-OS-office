@@ -1,16 +1,29 @@
-# Render: publica a pasta sites/ em onemapasoficeal.com.br
-# sites/oi/index.html  ->  https://onemapasoficeal.com.br/oi
+# Render: o OneMapas OS roda como servidor web em onemapasoficeal.com.br
+#   /          -> interface do OneMapas OS
+#   /<nome>/   -> sites criados (pasta sites/<nome>/)
 services:
   - type: web
-    runtime: static
-    name: onemapas-sites
+    runtime: python
+    name: onemapas-os
+    plan: free
     branch: main
-    buildCommand: "echo sites prontos"
-    staticPublishPath: ./sites
+    buildCommand: python3 --version
+    startCommand: python3 os/backend/onemapas_server.py
+    healthCheckPath: /api/status
     autoDeploy: true
+    # criar/editar site grava no GitHub; isso não deve disparar um novo deploy
+    buildFilter:
+      ignoredPaths:
+        - sites/**
+        - ISO/**
     domains:
       - onemapasoficeal.com.br
-    headers:
-      - path: /*
-        name: X-Powered-By
-        value: OneMapas OS
+    envVars:
+      - key: ONEMAPAS_DOMINIO
+        value: https://onemapasoficeal.com.br
+      - key: GITHUB_REPO
+        value: one-mapas-officeal/One-mapas-oficeal-OS-office
+      - key: GITHUB_BRANCH
+        value: main
+      - key: GITHUB_TOKEN
+        sync: false   # cole o token no painel do Render (permissão Contents: read and write)
