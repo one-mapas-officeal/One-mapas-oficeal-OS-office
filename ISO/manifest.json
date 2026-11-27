@@ -1,7 +1,7 @@
 {
   "projeto": "OneMapas OS",
   "descricao": "Índice das ISOs do OneMapas OS. Cada ISO fica em ISO/<canal>/<versão>/.",
-  "atualizado_em": "2026-11-27T03:47:09Z",
+  "atualizado_em": "2026-11-27T03:47:10Z",
   "canais": [
     "alpha",
     "beta",
@@ -21,8 +21,8 @@
       "nome": "onemapas-os-0.1.0-beta-amd64.iso",
       "arquitetura": "amd64",
       "base": "Debian 12 (bookworm)",
-      "status": "construindo: iniciando",
-      "progresso": 70,
+      "status": "preparando",
+      "progresso": 72,
       "etapas": [
         {
           "nome": "Interface Windows / Mint / Mac",
