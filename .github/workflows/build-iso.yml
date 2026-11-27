@@ -1,0 +1,61 @@
+name: Construir ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      canal:
+        description: "Canal (alpha, beta, em-testes, estavel)"
+        required: true
+        default: beta
+      versao:
+        description: "Número da versão"
+        required: true
+        default: 0.1.0
+
+permissions:
+  contents: write
+
+jobs:
+  iso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar live-build (Debian)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin mtools dosfstools syslinux syslinux-common isolinux
+          # live-build do Debian (o do Ubuntu é antigo demais)
+          curl -fsSLo /tmp/lb.deb http://deb.debian.org/debian/pool/main/l/live-build/live-build_20230502_all.deb || true
+          sudo apt-get install -y /tmp/lb.deb || sudo apt-get install -y live-build
+          sudo apt-get install -y debian-archive-keyring || true
+
+      - name: Marcar progresso (build em andamento)
+        run: |
+          python3 tools/atualizar_manifest.py "${{ inputs.canal }}" "${{ inputs.versao }}" /nao-existe "" "construindo" 80
+          git config user.name "OneMapas Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add ISO && git commit -m "ISO ${{ inputs.canal }} ${{ inputs.versao }}: build iniciado" && git push || true
+
+      - name: Construir ISO
+        run: sudo ./os/build-iso.sh "${{ inputs.canal }}" "${{ inputs.versao }}"
+
+      - name: Publicar no Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="iso-${{ inputs.canal }}-${{ inputs.versao }}"
+          ISO=$(ls out/*.iso)
+          gh release create "$TAG" "$ISO" "$ISO.sha256" --title "OneMapas OS ${{ inputs.versao }} (${{ inputs.canal }})" \
+            --notes "ISO gerada automaticamente. Veja ISO/${{ inputs.canal }}/${{ inputs.versao }}/" --prerelease \
+            || gh release upload "$TAG" "$ISO" "$ISO.sha256" --clobber
+          echo "URL=https://github.com/${{ github.repository }}/releases/download/$TAG/$(basename $ISO)" >> $GITHUB_ENV
+
+      - name: Atualizar ISO/manifest.json
+        run: |
+          git pull --rebase || true
+          python3 tools/atualizar_manifest.py "${{ inputs.canal }}" "${{ inputs.versao }}" out/*.iso "$URL" "pronta" 100
+          git add ISO
+          git commit -m "ISO ${{ inputs.canal }} ${{ inputs.versao }}: pronta"
+          git push

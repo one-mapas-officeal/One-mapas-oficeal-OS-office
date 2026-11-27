@@ -1,0 +1,50 @@
+# --- base gráfica ---
+xserver-xorg
+xserver-xorg-video-all
+xserver-xorg-input-all
+xinit
+lightdm
+openbox
+unclutter
+xterm
+chromium
+fonts-noto
+fonts-noto-color-emoji
+xdg-user-dirs
+xdg-utils
+pcmanfm
+mousepad
+# --- utilitários ---
+
+git
+curl
+ca-certificates
+# --- rede: gerenciador + ferramentas ---
+network-manager
+wpasupplicant
+iw
+wireless-tools
+rfkill
+pciutils
+usbutils
+ethtool
+# --- firmware de rede (os drivers estão no kernel Linux; isto é o firmware que eles carregam) ---
+firmware-linux
+firmware-linux-nonfree
+firmware-misc-nonfree
+firmware-iwlwifi
+firmware-realtek
+firmware-atheros
+firmware-brcm80211
+firmware-libertas
+firmware-ti-connectivity
+firmware-zd1211
+# --- idioma ---
+locales
+console-setup
+keyboard-configuration
+# --- live ---
+live-boot
+live-config
+live-config-systemd
+sudo

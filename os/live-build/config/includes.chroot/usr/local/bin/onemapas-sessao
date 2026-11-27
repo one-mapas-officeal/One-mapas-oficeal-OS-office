@@ -1,0 +1,13 @@
+#!/bin/sh
+# OneMapas OS (ISO): abre o servidor web em tela cheia. Sem internet, abre o configurador de rede.
+URL=${ONEMAPAS_URL:-https://onemapasoficeal.com.br}
+while true; do
+  until curl -fsS -o /dev/null --max-time 5 "$URL/api/status"; do
+    xterm -fa Monospace -fs 13 -geometry 90x28 -title "OneMapas OS - Conectar à internet" \
+      -e sh -c 'echo "Sem conexão. Escolha a rede Wi-Fi (ou ligue o cabo)."; sleep 1; nmtui-connect; onemapas-net --relatorio; sleep 2'
+    sleep 2
+  done
+  chromium --kiosk --no-first-run --noerrdialogs --disable-infobars --password-store=basic \
+    --user-data-dir="$HOME/.config/onemapas-ui" --app="$URL"
+  sleep 1
+done

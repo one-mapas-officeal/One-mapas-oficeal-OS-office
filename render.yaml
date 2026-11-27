@@ -1,0 +1,29 @@
+# Render: o OneMapas OS roda como servidor web em onemapasoficeal.com.br
+#   /          -> interface do OneMapas OS
+#   /<nome>/   -> sites criados (pasta sites/<nome>/)
+services:
+  - type: web
+    runtime: python
+    name: onemapas-os
+    plan: free
+    branch: main
+    buildCommand: python3 --version
+    startCommand: python3 os/backend/onemapas_server.py
+    healthCheckPath: /api/status
+    autoDeploy: true
+    # criar/editar site grava no GitHub; isso não deve disparar um novo deploy
+    buildFilter:
+      ignoredPaths:
+        - sites/**
+        - ISO/**
+    domains:
+      - onemapasoficeal.com.br
+    envVars:
+      - key: ONEMAPAS_DOMINIO
+        value: https://onemapasoficeal.com.br
+      - key: GITHUB_REPO
+        value: one-mapas-officeal/One-mapas-oficeal-OS-office
+      - key: GITHUB_BRANCH
+        value: main
+      - key: GITHUB_TOKEN
+        sync: false   # cole o token no painel do Render (permissão Contents: read and write)

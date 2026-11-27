@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OneMapas OS</title>
+<link rel="stylesheet" href="/_os/style.css">
+</head>
+<body class="tema-windows">
+
+<!-- Barra superior (estilo Mac) -->
+<div id="menubar">
+  <span class="logo" data-acao="menu">◆ OneMapas</span>
+  <span id="menubar-app">Área de Trabalho</span>
+  <span class="espaco"></span>
+  <span id="menubar-rede" title="Rede">📶</span>
+  <span id="menubar-relogio"></span>
+</div>
+
+<!-- Área de trabalho -->
+<div id="desktop">
+  <div id="icones"></div>
+  <div id="janelas"></div>
+</div>
+
+<!-- Barra de tarefas (Windows / Mint) e Dock (Mac) -->
+<div id="barra">
+  <button id="btn-iniciar" data-acao="menu" title="Menu"><span class="ic-iniciar"></span><span class="txt">Iniciar</span></button>
+  <div id="fixados"></div>
+  <div id="tarefas"></div>
+  <span class="espaco"></span>
+  <div id="bandeja">
+    <span id="bandeja-backend" title="Backend local">●</span>
+    <span id="bandeja-rede" title="Rede">📶</span>
+    <span id="bandeja-relogio"></span>
+  </div>
+</div>
+
+<!-- Menu iniciar -->
+<div id="menu" hidden>
+  <input id="menu-busca" placeholder="Pesquisar aplicativos…" autocomplete="off">
+  <div id="menu-apps"></div>
+  <div id="menu-rodape">
+    <span id="menu-dono">PC</span>
+    <button data-acao="desligar" title="Desligar">⏻</button>
+  </div>
+</div>
+
+<div id="notificacoes"></div>
+
+<script src="/_os/app.js"></script>
+</body>
+</html>

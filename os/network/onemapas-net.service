@@ -1,0 +1,12 @@
+[Unit]
+Description=OneMapas OS - detecta placas de rede e carrega drivers
+After=systemd-udev-settle.service
+Before=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/onemapas-net
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

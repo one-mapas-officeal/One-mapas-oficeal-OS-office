@@ -1,0 +1,35 @@
+{
+  "novidades": [
+    {
+      "versao": "0.2.0",
+      "canal": "beta",
+      "data": "27/11/2026",
+      "titulo": "OneMapas OS agora é um servidor web",
+      "itens": [
+        "Tudo roda online em onemapasoficeal.com.br (Render): a interface fica em / e cada site em /<nome>",
+        "Área de Trabalho virtual: cada site é uma pasta que você abre e edita no navegador",
+        "Editor de arquivos (HTML, CSS, JS…) com Ctrl+S para salvar",
+        "Dono do site = quem criou: uma chave secreta fica no seu navegador (Configurações > Chave do dono)",
+        "Cada mudança é copiada para o GitHub (sites/<nome>/), então nada se perde quando o Render reinicia",
+        "Sites rodam isolados (sandbox) e não conseguem mexer no OneMapas OS",
+        "A ISO abre direto o servidor web; sem internet, abre a tela para escolher o Wi-Fi"
+      ]
+    },
+    {
+      "versao": "0.1.0",
+      "canal": "beta",
+      "data": "27/11/2026",
+      "titulo": "Primeira versão do OneMapas OS",
+      "itens": [
+        "Criador de Sites: pergunta se a URL onemapasoficeal.com.br/<nome> está disponível (Render + GitHub + este PC)",
+        "Se a resposta for NÃO, mostra \"Escolha outra URL\"",
+        "Cada site ganha uma pasta na Área de Trabalho (Meus Sites OneMapas), e este PC é o dono",
+        "Publicação automática no GitHub (pasta sites/), com deploy feito pelo Render",
+        "Interface com 3 estilos: Windows, Linux Mint e Mac (Configurações > Aparência)",
+        "Abas de Novidades e de Progresso da ISO (lê ISO/manifest.json)",
+        "Base Linux Debian 12 com firmware de rede (Intel, Realtek, Atheros, Broadcom, MediaTek)",
+        "Ferramenta onemapas-net: detecta as placas de rede e carrega os drivers na inicialização"
+      ]
+    }
+  ]
+}
