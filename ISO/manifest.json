@@ -1,7 +1,7 @@
 {
   "projeto": "OneMapas OS",
   "descricao": "Índice das ISOs do OneMapas OS. Cada ISO fica em ISO/<canal>/<versão>/.",
-  "atualizado_em": "2026-11-27T04:31:33Z",
+  "atualizado_em": "2026-11-27T04:31:38Z",
   "canais": [
     "alpha",
     "beta",
@@ -58,8 +58,8 @@
       "download": null,
       "pasta": "ISO/beta/0.2.0",
       "nome": "onemapas-os-0.2.0-beta-amd64.iso",
-      "status": "gerando a imagem ISO",
-      "progresso": 90,
+      "status": "publicando",
+      "progresso": 97,
       "data": "2026-11-27",
       "build": "https://github.com/one-mapas-officeal/One-mapas-oficeal-OS-office/actions/runs/45940388147"
     },
