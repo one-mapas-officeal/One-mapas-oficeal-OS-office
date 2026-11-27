@@ -7,7 +7,9 @@ OneMapas OS - PC (o servidor onde o site roda).
 O que ele faz:
   1. Interface gráfica (área de trabalho estilo Windows / Mint / Mac) só para este PC.
   2. Cria os sites numa pasta da Área de Trabalho: "Meus Sites OneMapas/<nome>/".
-  3. Liga o PC ao Render por um túnel: o PC busca os pedidos dos visitantes no Render,
+  3. Envia uma cópia de cada site para o Supabase (pelo Render). Se o PC desligar,
+     os visitantes veem a cópia em vez de "PC desligado".
+  4. Liga o PC ao Render por um túnel: o PC busca os pedidos dos visitantes no Render,
      responde com os arquivos da pasta do site, e o Render entrega ao visitante.
         Cliente -> Render -> PC -> Render -> Cliente
      Funciona atrás de roteador/CGNAT, sem abrir portas.
@@ -18,6 +20,7 @@ e o Render guarda só o hash dela.
 Só usa a biblioteca padrão do Python.
 """
 import base64
+import hashlib
 import json
 import mimetypes
 import os
@@ -41,7 +44,7 @@ RAIZ = AQUI.parent.parent
 WEBUI = Path(os.environ.get("ONEMAPAS_WEBUI", AQUI.parent / "webui"))
 CONFIG_DIR = Path(os.environ.get("ONEMAPAS_CONFIG", Path.home() / ".config" / "onemapas"))
 CONFIG_FILE = CONFIG_DIR / "config.json"
-VERSAO = "0.3.0"
+VERSAO = "0.4.0"
 
 PADRAO = {
     "servidor": os.environ.get("ONEMAPAS_SERVIDOR", "https://onemapasos.oficeal.com"),
@@ -54,7 +57,11 @@ META = "onemapas-site.json"
 MAX_ARQUIVO_EDITOR = 1024 * 1024
 TRABALHADORES_TUNEL = 4
 
-estado = {"tunel": "desligado", "ultimo_erro": None, "pedidos_atendidos": 0, "ultimo_pedido": None}
+estado = {"tunel": "desligado", "ultimo_erro": None, "pedidos_atendidos": 0, "ultimo_pedido": None,
+          "copia": {"estado": "aguardando", "ultima": None, "arquivos": 0, "erro": None}}
+MAX_ARQUIVO_COPIA = 5 * 1024 * 1024
+INTERVALO_COPIA = 30
+acordar_copia = threading.Event()
 
 
 def agora():
@@ -193,6 +200,81 @@ def trabalhador_tunel(n):
         estado["ultimo_pedido"] = f"{agora()} {ped['metodo']} {ped['site']}{ped['caminho'][:80]} -> {status}"
 
 
+# ------------------------------------------------------------------ cópia no Supabase (pelo Render)
+def enviar_arquivo_copia(nome, caminho, corpo):
+    cfg = config()
+    url = f"{cfg['servidor']}/api/copia/{nome}?caminho={urllib.parse.quote(caminho)}"
+    req = urllib.request.Request(url, method="PUT", data=corpo,
+                                 headers={"X-Dono-Chave": cfg["chave"], "Content-Type": "application/octet-stream",
+                                          "User-Agent": "OneMapas-PC/" + VERSAO})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status == 200, ""
+    except urllib.error.HTTPError as e:
+        try:
+            return False, json.loads(e.read()).get("mensagem", f"HTTP {e.code}")
+        except Exception:
+            return False, f"HTTP {e.code}"
+    except Exception as e:
+        return False, e.__class__.__name__
+
+
+def arquivos_para_copia(nome):
+    base = pasta_sites() / nome
+    res = {}
+    for f in base.rglob("*"):
+        rel = f.relative_to(base).as_posix()
+        if (f.is_file() and f.name != META and not any(x.startswith(".") for x in f.relative_to(base).parts)
+                and f.stat().st_size <= MAX_ARQUIVO_COPIA and CAMINHO_VALIDO.match(rel)):
+            res[rel] = f
+    return res
+
+
+def sincronizar_copias():
+    """Compara cada arquivo (SHA-256) com o que já foi enviado e manda só o que mudou."""
+    arq_estado = CONFIG_DIR / "copia.json"
+    try:
+        enviados = json.loads(arq_estado.read_text("utf-8"))
+    except Exception:
+        enviados = {}
+    erros, total = [], 0
+    for site in meus_sites():
+        nome = site["nome"]
+        antes = enviados.get(nome, {})
+        agora_ = {}
+        for rel, f in arquivos_para_copia(nome).items():
+            h = hashlib.sha256(f.read_bytes()).hexdigest()
+            agora_[rel] = h
+            if antes.get(rel) != h:
+                ok, msg = enviar_arquivo_copia(nome, rel, f.read_bytes())
+                if not ok:
+                    erros.append(f"{nome}/{rel}: {msg}")
+                    agora_[rel] = antes.get(rel)  # tenta de novo na próxima volta
+        for rel in set(antes) - set(agora_):
+            st, r = render("DELETE", f"/api/copia/{nome}?caminho={urllib.parse.quote(rel)}")
+            if st not in (200, 400):
+                erros.append(f"{nome}/{rel}: apagar {r.get('mensagem', st)}")
+                agora_[rel] = antes[rel]
+        enviados[nome] = {k: v for k, v in agora_.items() if v}
+        total += len(enviados[nome])
+    for nome in set(enviados) - {s["nome"] for s in meus_sites()}:
+        enviados.pop(nome)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    arq_estado.write_text(json.dumps(enviados), "utf-8")
+    estado["copia"].update(estado="com erro" if erros else "em dia", ultima=agora(), arquivos=total,
+                           erro=erros[0] if erros else None)
+
+
+def trabalhador_copia():
+    while True:
+        acordar_copia.wait(INTERVALO_COPIA)
+        acordar_copia.clear()
+        try:
+            sincronizar_copias()
+        except Exception as e:
+            estado["copia"].update(estado="com erro", erro=str(e)[:200])
+
+
 # ------------------------------------------------------------------ sites (pasta na Área de Trabalho)
 def modelo(titulo, descricao, cor, dono):
     t = titulo.replace("&", "&amp;").replace("<", "&lt;")
@@ -276,6 +358,7 @@ def criar(dados):
     meta = {"nome": nome, "titulo": titulo, "url": r.get("url") or v.get("url"), "dono": cfg["dono"],
             "criado_em": agora(), "atualizado_em": agora()}
     (pasta / META).write_text(json.dumps(meta, indent=2, ensure_ascii=False), "utf-8")
+    acordar_copia.set()
     return 201, {**v, "url": meta["url"], "pasta": str(pasta), "mensagem": "Site criado!"}
 
 
@@ -424,6 +507,7 @@ class Handler(BaseHTTPRequestHandler):
         alvo.parent.mkdir(parents=True, exist_ok=True)
         alvo.write_text(str(dados.get("conteudo", "")), "utf-8")
         tocar_meta(m.group(1))
+        acordar_copia.set()
         return self.enviar(200, {"ok": True, "mensagem": "Salvo."})
 
     def do_DELETE(self):
@@ -441,6 +525,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.enviar(404, {"mensagem": "Arquivo não encontrado."})
             alvo.unlink()
             tocar_meta(nome)
+            acordar_copia.set()
             return self.enviar(200, {"ok": True})
         st, r = render("DELETE", f"/api/registro/{nome}")
         if st not in (200, 403, 404):
@@ -455,6 +540,8 @@ def main():
     cfg = config()
     for i in range(TRABALHADORES_TUNEL):
         threading.Thread(target=trabalhador_tunel, args=(i,), daemon=True).start()
+    threading.Thread(target=trabalhador_copia, daemon=True).start()
+    acordar_copia.set()
     porta = int(os.environ.get("ONEMAPAS_PORTA", "8080"))
     print(f"OneMapas OS {VERSAO} (PC) em http://127.0.0.1:{porta}\n  sites em: {pasta_sites()}\n"
           f"  Render: {cfg['servidor']}", flush=True)

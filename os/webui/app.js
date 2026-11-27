@@ -189,7 +189,7 @@ function appCriador(c) {
     if (r.status === 201) {
       form.hidden = true;
       resp.innerHTML = `<div class="resposta sim"><b class="sim">Site criado!</b><br>📁 ${esc(r.pasta)}<br>🌐 <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a>
-        <div class="mudo">O site fica no ar enquanto este PC estiver ligado e conectado.</div></div>
+        <div class="mudo">O site roda neste PC. Uma cópia vai para o Supabase: se o PC desligar, os visitantes veem a cópia.</div></div>
         <div class="linha"><button class="btn prim" id="cs-editar">Editar arquivos</button><button class="btn" id="cs-ver">Ver site</button></div>`;
       $("#cs-editar", c).onclick = () => abrirApp("editor", { site: r.nome });
       $("#cs-ver", c).onclick = () => window.open(r.url, "_blank", "noopener");
@@ -360,6 +360,8 @@ async function appRede(c) {
       ${s ? `<tr><td>Render</td><td>${s.render_online ? "✅ online" : "❌ sem resposta"} · ${esc(s.servidor)}</td></tr>
       <tr><td>Túnel</td><td>${icone[t.tunel] || esc(t.tunel)}</td></tr>
       <tr><td>Sites neste PC</td><td>${esc(s.sites)}</td></tr>
+      <tr><td>Cópia no Supabase</td><td>${{ "em dia": "✅ em dia", "com erro": "⚠️ com erro", aguardando: "⏳ aguardando" }[t.copia?.estado] || esc(t.copia?.estado)} · ${esc(t.copia?.arquivos ?? 0)} arquivo(s)${t.copia?.ultima ? " · " + esc(t.copia.ultima.slice(11, 16)) + " UTC" : ""}</td></tr>
+      ${t.copia?.erro ? `<tr><td>Erro da cópia</td><td class="mudo">${esc(t.copia.erro)}</td></tr>` : ""}
       <tr><td>Pedidos atendidos</td><td>${esc(t.pedidos_atendidos)}</td></tr>
       <tr><td>Último pedido</td><td class="mudo">${esc(t.ultimo_pedido || "—")}</td></tr>
       ${t.ultimo_erro ? `<tr><td>Último erro</td><td class="mudo">${esc(t.ultimo_erro)}</td></tr>` : ""}

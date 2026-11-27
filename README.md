@@ -26,7 +26,12 @@ Cliente ◄────────────── Render ◄── PC
 
 O PC **se conecta ao Render primeiro** e fica esperando pedidos (túnel por *long-polling*).
 Por isso funciona em internet de casa ou 4G com CGNAT, sem abrir portas no roteador e sem IP fixo.
-Se o PC desligar, o visitante vê "O PC do dono está desligado", e o site volta sozinho quando o PC liga.
+### Supabase (projeto Mapasos)
+- **Tabela `public.sites`**: qual nome pertence a qual PC (hash da chave do PC). A chave primária impede dois PCs com o mesmo nome.
+- **Bucket `sites`**: cópia dos arquivos de cada site. O PC envia pelo Render só o que mudou (verificado a cada 30 s e na hora em que salva).
+- **PC desligado**: o Render mostra a cópia do Supabase (`X-OneMapas-Origem: copia-supabase`), e o site continua no ar.
+  Sem cópia, o visitante vê "O PC do dono está desligado".
+- A chave secreta do Supabase fica **só no Render**. RLS ligado e nenhum acesso para `anon`/`authenticated`.
 
 ### Criando um site (no PC)
 O usuário digita a URL e o sistema pergunta ao Render: *está disponível?*
@@ -49,13 +54,12 @@ Conexão com o Render, Terminal, Configurações.
 
 ```
 os/
-  render/gateway.py   roda no Render: portal, registro dos nomes, túnel e proxy dos sites
-  pc/onemapas_pc.py   roda no PC: interface, pasta dos sites e túnel até o Render
+  render/gateway.py   roda no Render: portal, registro (Supabase), túnel, proxy e cópia dos sites
+  pc/onemapas_pc.py   roda no PC: interface, pasta dos sites, túnel até o Render e envio da cópia
   webui/              interface gráfica + novidades.json
   network/            drivers de rede da ISO (onemapas-net, serviço, modprobe, NetworkManager)
   live-build/         configuração da ISO (Debian 12)
   build-iso.sh        gera a ISO
-registro/             quais nomes pertencem a qual PC (o gateway grava aqui via GitHub)
 ISO/manifest.json     índice das ISOs;  ISO/<canal>/<versão>/
 render.yaml           configuração do Render
 ```
@@ -67,7 +71,7 @@ render.yaml           configuração do Render
 - `*.onemapasos.oficeal.com`: CNAME para o mesmo endereço (DNS curinga: é o que faz `[URL].onemapasos.oficeal.com` funcionar)
 
 **2. Render**: *New > Blueprint* com este repositório (usa o `render.yaml`).
-- Em *Environment*, defina `GITHUB_TOKEN` (token só deste repositório, **Contents: Read and write**). É onde o registro dos nomes é guardado.
+- Em *Environment*, defina `SUPABASE_SECRET_KEY` (Supabase > Project Settings > API Keys > *secret key*). `SUPABASE_URL` já vem no `render.yaml`.
 - Em *Custom Domains*, adicione `onemapasos.oficeal.com` e `*.onemapasos.oficeal.com`.
 - Use o plano **Starter** ou maior: o plano grátis "dorme" e derruba os túneis.
 

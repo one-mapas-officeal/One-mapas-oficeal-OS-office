@@ -1,6 +1,19 @@
 {
   "novidades": [
     {
+      "versao": "0.4.0",
+      "canal": "beta",
+      "data": "27/11/2026",
+      "titulo": "Supabase: registro dos nomes e cópia dos sites",
+      "itens": [
+        "Os nomes dos sites ficam no banco do Supabase (projeto Mapasos), e dois PCs nunca pegam o mesmo nome",
+        "Cada site ganha uma cópia no Supabase Storage, atualizada sozinha quando um arquivo muda",
+        "PC desligado? O visitante vê a cópia, e o site continua no ar",
+        "A chave do Supabase fica só no Render; os PCs não têm acesso direto ao banco",
+        "App Conexão com o Render mostra o estado da cópia"
+      ]
+    },
+    {
       "versao": "0.3.0",
       "canal": "beta",
       "data": "27/11/2026",

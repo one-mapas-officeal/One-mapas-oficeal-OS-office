@@ -1,3 +1,4 @@
 out/
 *.iso
 __pycache__/
+.dados-gateway/

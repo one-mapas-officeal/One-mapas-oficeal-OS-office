@@ -14,7 +14,6 @@ services:
     autoDeploy: true
     buildFilter:
       ignoredPaths:
-        - registro/**
         - ISO/**
     domains:
       - onemapasos.oficeal.com
@@ -22,9 +21,12 @@ services:
     envVars:
       - key: ONEMAPAS_DOMINIO_SITES
         value: onemapasos.oficeal.com
+      # Supabase (projeto Mapasos): tabela public.sites + bucket "sites"
+      - key: SUPABASE_URL
+        value: https://iahcymwrsmbagapktstu.supabase.co
+      - key: SUPABASE_SECRET_KEY
+        sync: false   # cole no painel do Render: Supabase > Project Settings > API Keys > secret key
       - key: GITHUB_REPO
         value: one-mapas-officeal/One-mapas-oficeal-OS-office
       - key: GITHUB_BRANCH
         value: main
-      - key: GITHUB_TOKEN
-        sync: false   # token só deste repositório, Contents: read and write (guarda o registro dos nomes)

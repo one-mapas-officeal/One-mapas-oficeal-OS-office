@@ -15,7 +15,10 @@ o PC responde e o Render devolve ao visitante.
 Endereço público de um site:
     https://<nome>.<DOMINIO_SITES>/?sistema=onemapasoficealOS&site=true&load=em-espera
       load=em-espera  -> página de espera enquanto conecta no PC do dono
-      load=conectado  -> o site em si (vem do PC)
+      load=conectado  -> o site em si (vem do PC; se o PC estiver desligado, vem da cópia no Supabase)
+
+Banco: Supabase (tabela public.sites = quem é dono de qual nome; bucket "sites" = cópia dos arquivos).
+Variáveis: SUPABASE_URL e SUPABASE_SECRET_KEY (ou SUPABASE_SERVICE_ROLE_KEY). Sem elas, usa o disco (só para teste).
 
 Sem DNS curinga (para testar no onrender.com): https://<servico>.onrender.com/_site/<nome>/
 
@@ -24,6 +27,8 @@ Rotas:
   GET  /api/verificar?nome=oi
   POST /api/registrar           {nome, dono_nome}           (header X-Dono-Chave)
   DELETE /api/registro/<nome>                                (header X-Dono-Chave)
+  PUT    /api/copia/<nome>?caminho=index.html  corpo = arquivo (header X-Dono-Chave)
+  DELETE /api/copia/<nome>?caminho=index.html                 (header X-Dono-Chave)
   GET  /api/manifest  /api/novidades
   GET  /_tunel/esperar          o PC busca o próximo pedido   (header X-Dono-Chave)
   POST /_tunel/responder/<id>   o PC devolve a resposta       (header X-Dono-Chave)
@@ -34,6 +39,7 @@ import base64
 import hashlib
 import hmac
 import json
+import mimetypes
 import os
 import queue
 import re
@@ -50,13 +56,12 @@ from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
 RAIZ = AQUI.parent.parent
-REGISTRO_DIR = Path(os.environ.get("ONEMAPAS_REGISTRO", RAIZ / "registro"))
 
 DOMINIO_SITES = os.environ.get("ONEMAPAS_DOMINIO_SITES", "onemapasos.oficeal.com").lower().strip(".")
 REPO = os.environ.get("GITHUB_REPO", "one-mapas-officeal/One-mapas-oficeal-OS-office")
 BRANCH = os.environ.get("GITHUB_BRANCH", "main")
-TOKEN = os.environ.get("GITHUB_TOKEN", "")
-VERSAO = "0.3.0"
+TOKEN = os.environ.get("GITHUB_TOKEN", "")  # opcional: só para ler ISO/manifest.json se o repositório for privado
+VERSAO = "0.4.0"
 
 PARAMS_SITE = "sistema=onemapasoficealOS&site=true"
 NOME_VALIDO = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -116,77 +121,171 @@ def gh_url(caminho):
     return f"https://api.github.com/repos/{REPO}/contents/{urllib.parse.quote(caminho)}"
 
 
-# ------------------------------------------------------------------ registro dos nomes (quem é dono de quê)
-# Fica em memória, no disco (registro/<nome>.json) e no GitHub (para sobreviver aos deploys do Render).
-registro = {}
+# ------------------------------------------------------------------ armazenamento: Supabase (ou disco, para testes)
+# Tabela public.sites  -> qual nome pertence a qual PC (hash da chave)
+# Bucket  "sites"      -> cópia dos arquivos de cada site (usada quando o PC está desligado)
+# A chave secreta do Supabase fica só aqui no Render; os PCs nunca a recebem.
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+DADOS_LOCAIS = Path(os.environ.get("ONEMAPAS_DADOS", RAIZ / ".dados-gateway"))
+BUCKET = "sites"
+MAX_ARQUIVO_COPIA = 5 * 1024 * 1024
+CAMINHO_VALIDO = re.compile(r"^(?:[A-Za-z0-9_][A-Za-z0-9_.-]{0,80}/){0,5}[A-Za-z0-9_][A-Za-z0-9_.-]{0,80}$")
+
+
+def caminho_ok(c):
+    return bool(CAMINHO_VALIDO.match(c or "")) and ".." not in c and c != "onemapas-site.json"
+
+
+class Supabase:
+    nome = "supabase"
+
+    def _h(self, extra=None):
+        h = {"apikey": SUPABASE_KEY}
+        if SUPABASE_KEY.startswith("eyJ"):  # chave antiga (JWT service_role)
+            h["Authorization"] = "Bearer " + SUPABASE_KEY
+        h.update(extra or {})
+        return h
+
+    def _q(self, nome):
+        return urllib.parse.quote(nome, safe="")
+
+    def listar(self):
+        st, c = http(f"{SUPABASE_URL}/rest/v1/sites?select=nome,dono_hash,dono_nome,criado_em,copia_em",
+                     cabecalhos=self._h())
+        if st != 200:
+            raise RuntimeError(f"Supabase listar: HTTP {st} {c[:200]!r}")
+        return {d["nome"]: d for d in json.loads(c)}
+
+    def inserir(self, d):
+        st, c = http(f"{SUPABASE_URL}/rest/v1/sites", "POST", json.dumps(d).encode(),
+                     self._h({"Content-Type": "application/json", "Prefer": "return=minimal"}))
+        if st == 201:
+            return True
+        if st == 409:
+            return False
+        raise RuntimeError(f"Supabase inserir: HTTP {st} {c[:200]!r}")
+
+    def apagar(self, nome):
+        http(f"{SUPABASE_URL}/rest/v1/sites?nome=eq.{self._q(nome)}", "DELETE", cabecalhos=self._h())
+
+    def marcar_copia(self, nome, quando):
+        http(f"{SUPABASE_URL}/rest/v1/sites?nome=eq.{self._q(nome)}", "PATCH",
+             json.dumps({"copia_em": quando}).encode(),
+             self._h({"Content-Type": "application/json", "Prefer": "return=minimal"}))
+
+    def salvar_arquivo(self, nome, caminho, corpo, tipo):
+        st, c = http(f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{nome}/{urllib.parse.quote(caminho)}", "POST", corpo,
+                     self._h({"Content-Type": tipo or "application/octet-stream", "x-upsert": "true",
+                              "Cache-Control": "no-cache"}), timeout=30)
+        if st not in (200, 201):
+            raise RuntimeError(f"Supabase Storage: HTTP {st} {c[:200]!r}")
+
+    def ler_arquivo(self, nome, caminho):
+        url = f"{SUPABASE_URL}/storage/v1/object/authenticated/{BUCKET}/{nome}/{urllib.parse.quote(caminho)}"
+        req = urllib.request.Request(url, headers={**self._h(), "User-Agent": "OneMapas-Gateway"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.read(), r.headers.get("Content-Type")
+        except Exception:
+            return None
+
+    def _listar_pasta(self, prefixo):
+        st, c = http(f"{SUPABASE_URL}/storage/v1/object/list/{BUCKET}", "POST",
+                     json.dumps({"prefix": prefixo, "limit": 1000}).encode(),
+                     self._h({"Content-Type": "application/json"}))
+        res = []
+        if st == 200:
+            for item in json.loads(c):
+                caminho = f"{prefixo}/{item['name']}"
+                res += [caminho] if item.get("id") else self._listar_pasta(caminho)
+        return res
+
+    def apagar_arquivos(self, nome, caminhos=None):
+        alvos = [f"{nome}/{c}" for c in caminhos] if caminhos else self._listar_pasta(nome)
+        for i in range(0, len(alvos), 500):
+            http(f"{SUPABASE_URL}/storage/v1/object/{BUCKET}", "DELETE",
+                 json.dumps({"prefixes": alvos[i:i + 500]}).encode(), self._h({"Content-Type": "application/json"}))
+
+
+class Local:
+    """Mesma interface, no disco. Só para testar sem Supabase (no Render o disco é apagado a cada deploy)."""
+    nome = "local (sem Supabase)"
+
+    def __init__(self):
+        (DADOS_LOCAIS / "registro").mkdir(parents=True, exist_ok=True)
+        (DADOS_LOCAIS / "copias").mkdir(parents=True, exist_ok=True)
+
+    def _r(self, nome):
+        return DADOS_LOCAIS / "registro" / f"{nome}.json"
+
+    def listar(self):
+        res = {}
+        for f in (DADOS_LOCAIS / "registro").glob("*.json"):
+            d = json.loads(f.read_text("utf-8"))
+            res[d["nome"]] = d
+        return res
+
+    def inserir(self, d):
+        try:
+            with open(self._r(d["nome"]), "x", encoding="utf-8") as f:
+                json.dump({**d, "criado_em": agora(), "copia_em": None}, f)
+            return True
+        except FileExistsError:
+            return False
+
+    def apagar(self, nome):
+        self._r(nome).unlink(missing_ok=True)
+
+    def marcar_copia(self, nome, quando):
+        if self._r(nome).exists():
+            d = json.loads(self._r(nome).read_text("utf-8"))
+            d["copia_em"] = quando
+            self._r(nome).write_text(json.dumps(d), "utf-8")
+
+    def salvar_arquivo(self, nome, caminho, corpo, tipo):
+        p = DADOS_LOCAIS / "copias" / nome / caminho
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(corpo)
+
+    def ler_arquivo(self, nome, caminho):
+        p = DADOS_LOCAIS / "copias" / nome / caminho
+        return (p.read_bytes(), None) if p.is_file() else None
+
+    def apagar_arquivos(self, nome, caminhos=None):
+        base = DADOS_LOCAIS / "copias" / nome
+        if caminhos is None:
+            import shutil
+            shutil.rmtree(base, ignore_errors=True)
+        else:
+            for c in caminhos:
+                (base / c).unlink(missing_ok=True)
+
+
+banco = Supabase() if SUPABASE_URL and SUPABASE_KEY else Local()
+registro = {}            # cache em memória da tabela sites
 trava_registro = threading.Lock()
-fila_github = queue.Queue()
-estado_github = {"pendentes": 0, "ultimo_erro": None, "ultimo_ok": None}
 registros_ip = {}
+estado_banco = {"tipo": banco.nome, "ultimo_erro": None, "carregado_em": None}
 
 
 def carregar_registro():
-    REGISTRO_DIR.mkdir(parents=True, exist_ok=True)
-    for f in REGISTRO_DIR.glob("*.json"):
-        try:
-            d = json.loads(f.read_text("utf-8"))
-            registro[d["nome"]] = d
-        except Exception:
-            pass
-    # nomes registrados depois do último deploy estão só no GitHub
-    if TOKEN:
-        st, corpo = http(gh_url("registro") + f"?ref={BRANCH}", cabecalhos=gh_headers())
-        if st == 200:
-            for item in json.loads(corpo):
-                nome = item.get("name", "")[:-5]
-                if item.get("name", "").endswith(".json") and nome not in registro:
-                    st2, c2 = http(gh_url(f"registro/{item['name']}") + f"?ref={BRANCH}",
-                                   cabecalhos=gh_headers({"Accept": "application/vnd.github.raw+json"}))
-                    if st2 == 200:
-                        try:
-                            d = json.loads(c2)
-                            registro[d["nome"]] = d
-                            (REGISTRO_DIR / item["name"]).write_bytes(c2)
-                        except Exception:
-                            pass
-    print(f"[registro] {len(registro)} sites registrados", flush=True)
+    try:
+        novo = banco.listar()
+        with trava_registro:
+            registro.clear()
+            registro.update(novo)
+        estado_banco["carregado_em"] = agora()
+    except Exception as e:
+        estado_banco["ultimo_erro"] = f"{agora()} {e}"
+        print("[banco]", e, file=sys.stderr, flush=True)
 
 
-def trabalhador_github():
+def recarregar_sempre():
+    """Mantém o cache igual ao banco (caso o Render rode mais de uma instância)."""
     while True:
-        acao, caminho, conteudo, msg = fila_github.get()
-        try:
-            for tentativa in range(3):
-                st, corpo = http(gh_url(caminho) + f"?ref={BRANCH}", cabecalhos=gh_headers())
-                sha = json.loads(corpo).get("sha") if st == 200 else None
-                h = gh_headers({"Content-Type": "application/json"})
-                if acao == "salvar":
-                    dados = {"message": msg, "content": base64.b64encode(conteudo).decode(), "branch": BRANCH}
-                    if sha:
-                        dados["sha"] = sha
-                    st, resp = http(gh_url(caminho), "PUT", json.dumps(dados).encode(), h, 20)
-                elif sha:
-                    st, resp = http(gh_url(caminho), "DELETE",
-                                    json.dumps({"message": msg, "sha": sha, "branch": BRANCH}).encode(), h, 20)
-                else:
-                    st, resp = 200, b""
-                if st in (200, 201):
-                    estado_github["ultimo_ok"] = agora()
-                    break
-                if st == 409 and tentativa < 2:
-                    time.sleep(1.5)
-                    continue
-                estado_github["ultimo_erro"] = f"{agora()} {caminho}: HTTP {st} {resp[:150].decode(errors='ignore')}"
-                print("[github]", estado_github["ultimo_erro"], file=sys.stderr, flush=True)
-                break
-        finally:
-            estado_github["pendentes"] = fila_github.qsize()
-
-
-def gh_fila(acao, caminho, conteudo, msg):
-    if TOKEN:
-        fila_github.put((acao, caminho, conteudo, msg))
-        estado_github["pendentes"] = fila_github.qsize()
+        time.sleep(60)
+        carregar_registro()
 
 
 def verificar(nome):
@@ -200,7 +299,8 @@ def verificar(nome):
     ocupado = nome in registro
     return {**base, "disponivel": not ocupado, "resposta": "não" if ocupado else "sim",
             "mensagem": "Escolha outra URL" if ocupado else f"{url_site(nome)} está disponível!",
-            "checagens": [{"onde": "Render", "resultado": "já existe" if ocupado else "livre"}]}
+            "checagens": [{"onde": "Render + Supabase" if banco.nome == "supabase" else "Render",
+                           "resultado": "já existe" if ocupado else "livre"}]}
 
 
 def registrar(nome, chave, dono_nome, ip):
@@ -217,18 +317,39 @@ def registrar(nome, chave, dono_nome, ip):
         lst = [x for x in registros_ip.get(ip, []) if t - x < 3600]
         if len(lst) >= MAX_REGISTROS_POR_IP_HORA:
             return 429, {"mensagem": "Muitos sites criados na última hora. Tente mais tarde."}
+        d = {"nome": v["nome"], "dono_hash": h, "dono_nome": str(dono_nome or "")[:60]}
+        try:
+            ok = banco.inserir(d)  # a chave primária no banco impede dois PCs com o mesmo nome
+        except Exception as e:
+            estado_banco["ultimo_erro"] = f"{agora()} {e}"
+            return 503, {"mensagem": "Banco de dados indisponível. Tente de novo."}
+        if not ok:
+            carregar_registro()
+            return 409, {**v, "disponivel": False, "resposta": "não", "mensagem": "Escolha outra URL"}
         registros_ip[ip] = lst + [t]
-        d = {"nome": v["nome"], "dono_hash": h, "dono_nome": str(dono_nome or "")[:60], "criado_em": agora()}
-        registro[d["nome"]] = d
-        conteudo = json.dumps(d, indent=2, ensure_ascii=False).encode()
-        (REGISTRO_DIR / f"{d['nome']}.json").write_bytes(conteudo)
-    gh_fila("salvar", f"registro/{d['nome']}.json", conteudo, f"Registrar site {d['nome']}")
-    return 201, {**v, "disponivel": False, "mensagem": "Registrado!", "salvo_no_github": bool(TOKEN)}
+        registro[d["nome"]] = {**d, "criado_em": agora(), "copia_em": None}
+    return 201, {**v, "disponivel": False, "mensagem": "Registrado!"}
 
 
 def dono_de(nome, chave):
     d = registro.get(nome)
     return bool(d and chave_valida(chave) and hmac.compare_digest(d["dono_hash"], hash_chave(chave)))
+
+
+def ler_da_copia(nome, caminho):
+    """Procura o arquivo na cópia (Supabase Storage). Devolve (status, tipo, corpo) ou None."""
+    rel = urllib.parse.unquote(caminho or "/").lstrip("/")
+    tentativas = [rel + "index.html"] if rel == "" or rel.endswith("/") else [rel, rel + "/index.html"]
+    for c in tentativas:
+        if caminho_ok(c):
+            r = banco.ler_arquivo(nome, c)
+            if r:
+                tipo = r[1] if r[1] and r[1] != "application/octet-stream" else (mimetypes.guess_type(c)[0] or "application/octet-stream")
+                return 200, tipo, r[0]
+    r = banco.ler_arquivo(nome, "404.html")
+    if r:
+        return 404, "text/html; charset=utf-8", r[0]
+    return None
 
 
 # ------------------------------------------------------------------ túnel (PC <-> Render)
@@ -318,7 +439,7 @@ const base={json.dumps(base)}, alvo=base+"/?{PARAMS_SITE}&load=conectado";
 let n=0;
 async function tenta(){{
   try{{const r=await fetch(base+"/_onemapas/estado",{{cache:"no-store"}});const d=await r.json();
-    if(d.online){{location.replace(alvo);return;}}}}catch(e){{}}
+    if(d.online||d.copia){{location.replace(alvo);return;}}}}catch(e){{}}
   if(++n===15){{document.getElementById("t").textContent="O PC do dono está desligado";
     document.getElementById("m").innerHTML="Este site roda no computador do dono, e ele não está conectado agora.<br>Esta página continua tentando sozinha.";}}
   setTimeout(tenta, n<15?2000:10000);
@@ -423,7 +544,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/status":
             return self.json(200, {"ok": True, "versao": VERSAO, "dominio_sites": DOMINIO_SITES, "sites": len(registro),
                                    "pcs_online": sum(1 for d in set(x["dono_hash"] for x in registro.values()) if tunel.online(d)),
-                                   "github": {"configurado": bool(TOKEN), **estado_github}})
+                                   "banco": estado_banco})
         if u.path == "/api/verificar":
             return self.json(200, verificar(q.get("nome", [""])[0]))
         if u.path == "/api/manifest":
@@ -450,9 +571,32 @@ class Handler(BaseHTTPRequestHandler):
             if not dono_de(nome, chave):
                 return self.json(403, {"mensagem": "Só o PC dono pode apagar."})
             with trava_registro:
+                banco.apagar_arquivos(nome)
+                banco.apagar(nome)
                 registro.pop(nome, None)
-                (REGISTRO_DIR / f"{nome}.json").unlink(missing_ok=True)
-            gh_fila("apagar", f"registro/{nome}.json", None, f"Apagar site {nome}")
+            return self.json(200, {"ok": True})
+        m = re.fullmatch(r"/api/copia/([a-z0-9-]+)", u.path)
+        if m and self.command in ("PUT", "DELETE"):
+            nome, caminho = m.group(1), q.get("caminho", [""])[0]
+            if not dono_de(nome, chave):
+                return self.json(403, {"mensagem": "Só o PC dono pode mexer na cópia."})
+            if not caminho_ok(caminho):
+                return self.json(400, {"mensagem": "Caminho inválido."})
+            try:
+                if self.command == "DELETE":
+                    banco.apagar_arquivos(nome, [caminho])
+                else:
+                    corpo = self.ler_corpo(MAX_ARQUIVO_COPIA)
+                    if corpo is None:
+                        return self.json(413, {"mensagem": "Arquivo maior que 5 MB não entra na cópia."})
+                    tipo = mimetypes.guess_type(caminho)[0] or "application/octet-stream"
+                    banco.salvar_arquivo(nome, caminho, corpo, tipo)
+                quando = agora()
+                banco.marcar_copia(nome, quando)
+                registro[nome]["copia_em"] = quando
+            except Exception as e:
+                estado_banco["ultimo_erro"] = f"{agora()} {e}"
+                return self.json(502, {"mensagem": str(e)[:200]})
             return self.json(200, {"ok": True})
 
         # ---- túnel
@@ -492,15 +636,25 @@ class Handler(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(query)
         load = q.get("load", [""])[0]
         online = tunel.online(d["dono_hash"])
+        tem_copia = bool(d.get("copia_em"))
 
         if caminho == "/_onemapas/estado":
-            return self.json(200, {"site": nome, "online": online})
+            return self.json(200, {"site": nome, "online": online, "copia": tem_copia})
         # a página inicial sempre passa pela tela de espera primeiro
         if caminho in ("", "/") and self.command in ("GET", "HEAD"):
-            if load != "conectado" or not online:
+            if load != "conectado" or not (online or tem_copia):
                 if load != "em-espera" or q.get("sistema", [""])[0] != "onemapasoficealOS":
                     return self.redirecionar(f"{base}/?{PARAMS_SITE}&load=em-espera")
                 return self.html(200, pagina_espera(nome, base))
+        if not online and tem_copia and self.command in ("GET", "HEAD"):
+            r = ler_da_copia(nome, caminho)
+            if r:
+                st, tipo, corpo = r
+                if tipo.startswith("text/") and "charset" not in tipo:
+                    tipo += "; charset=utf-8"
+                return self.responder_bruto(st, corpo, tipo, {"Cache-Control": "no-cache", "X-OneMapas-Site": nome,
+                                                             "X-OneMapas-Origem": "copia-supabase"})
+            return self.html(404, pagina("Não encontrado", f"<h1>404</h1><p>Página não encontrada em {nome}.</p>"))
         if not online:
             return self.html(503, pagina("PC desligado", f"<h1>{nome}</h1><p>O PC do dono está desligado agora.</p>"
                                          f"<p><a class='btn' href='{base}/?{PARAMS_SITE}&load=em-espera'>Tentar de novo</a></p>"),
@@ -533,6 +687,7 @@ class Handler(BaseHTTPRequestHandler):
                 extra[k] = str(v)
         tipo = extra.pop("Content-Type", None) or extra.pop("content-type", None) or "application/octet-stream"
         extra["X-OneMapas-Site"] = nome
+        extra["X-OneMapas-Origem"] = "pc"
         self.responder_bruto(status, corpo_resp, tipo, extra)
 
     do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = tratar
@@ -540,10 +695,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     carregar_registro()
-    threading.Thread(target=trabalhador_github, daemon=True).start()
+    threading.Thread(target=recarregar_sempre, daemon=True).start()
     porta = int(os.environ.get("PORT", "8080"))
-    print(f"OneMapas Gateway {VERSAO} porta {porta}  sites em *.{DOMINIO_SITES}  "
-          f"github={'ligado' if TOKEN else 'DESLIGADO'}", flush=True)
+    print(f"OneMapas Gateway {VERSAO} porta {porta}  sites em *.{DOMINIO_SITES}  banco={banco.nome}  "
+          f"{len(registro)} sites", flush=True)
     ThreadingHTTPServer(("0.0.0.0", porta), Handler).serve_forever()
 
 
