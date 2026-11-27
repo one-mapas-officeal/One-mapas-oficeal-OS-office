@@ -5,8 +5,8 @@
   "nome": "onemapas-os-0.1.0-beta-amd64.iso",
   "arquitetura": "amd64",
   "base": "Debian 12 (bookworm)",
-  "status": "publicando",
-  "progresso": 97,
+  "status": "pronta",
+  "progresso": 100,
   "etapas": [
     {
       "nome": "Interface Windows / Mint / Mac",
@@ -38,16 +38,16 @@
     },
     {
       "nome": "Build da ISO no GitHub Actions",
-      "feito": false
+      "feito": true
     },
     {
       "nome": "Testes em PC real",
       "feito": false
     }
   ],
-  "tamanho_mb": null,
-  "sha256": null,
-  "download": null,
+  "tamanho_mb": 1550.5,
+  "sha256": "8040d660966744440189d05e8be728c6c47501bd13f9d82d99a1544a6d8f4385",
+  "download": "https://github.com/one-mapas-officeal/One-mapas-oficeal-OS-office/releases/download/iso-beta-0.1.0/onemapas-os-0.1.0-beta-amd64.iso",
   "data": "2026-11-27",
   "build": "https://github.com/one-mapas-officeal/One-mapas-oficeal-OS-office/actions/runs/45936445467"
 }
