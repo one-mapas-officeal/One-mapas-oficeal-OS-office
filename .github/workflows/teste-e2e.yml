@@ -1,0 +1,16 @@
+name: Teste de ponta a ponta (Render + Supabase)
+
+# Roda quando testes/pedido-e2e.json muda: cria um site de teste de verdade e apaga no fim.
+on:
+  push:
+    paths:
+      - testes/pedido-e2e.json
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Teste
+        run: python3 tools/teste_e2e.py "$(python3 -c 'import json;print(json.load(open("testes/pedido-e2e.json"))["gateway"])')"
