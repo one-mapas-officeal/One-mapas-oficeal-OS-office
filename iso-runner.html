@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>ISO Runner</title>
+<style>
+  :root { --bg:#000; --bar:#16181d; --fg:#e8e8e8; --muted:#8a8f98; --btn:#2a2e36; --accent:#3d7eff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:14px system-ui,sans-serif; overflow:hidden; }
+  #setup { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; background:#0d0f12; z-index:10; }
+  #setup .card { width:100%; max-width:420px; background:var(--bar); border-radius:12px; padding:20px; }
+  #setup h1 { font-size:18px; margin:0 0 14px; }
+  #setup label { display:block; margin:12px 0 4px; color:var(--muted); font-size:13px; }
+  #setup input[type=file], #setup select { width:100%; color:var(--fg); background:var(--btn); border:0; border-radius:8px; padding:10px; }
+  #start { margin-top:18px; width:100%; padding:12px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-size:16px; }
+  #status { margin-top:10px; color:var(--muted); font-size:13px; min-height:1em; }
+  #bar { position:fixed; left:0; right:0; bottom:0; display:none; gap:6px; padding:6px; background:var(--bar); overflow-x:auto; z-index:5; }
+  #bar button { flex:0 0 auto; padding:9px 12px; border:0; border-radius:7px; background:var(--btn); color:var(--fg); font-size:14px; }
+  #bar button.on { background:var(--accent); }
+  #screen_container { position:fixed; top:0; left:0; right:0; bottom:52px; display:flex; align-items:center; justify-content:center; touch-action:none; }
+  #screen_container > div { white-space:pre; font:14px monospace; line-height:14px; }
+  #screen_container canvas { display:none; max-width:100%; max-height:100%; image-rendering:pixelated; }
+  #kbd { position:fixed; left:-1000px; top:0; width:10px; height:10px; opacity:0; }
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <div class="card">
+    <h1>ISO Runner</h1>
+    <label>Imagem ISO (CD-ROM)</label>
+    <input type="file" id="iso" accept=".iso,.img,application/octet-stream">
+    <label>Disco rígido .img (opcional)</label>
+    <input type="file" id="hda">
+    <label>Memória RAM</label>
+    <select id="mem">
+      <option value="128">128 MB</option>
+      <option value="256" selected>256 MB</option>
+      <option value="512">512 MB</option>
+      <option value="1024">1024 MB</option>
+    </select>
+    <button id="start">Iniciar</button>
+    <div id="status"></div>
+  </div>
+</div>
+
+<div id="screen_container">
+  <div></div>
+  <canvas></canvas>
+</div>
+
+<textarea id="kbd" class="phone_keyboard" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+
+<div id="bar">
+  <button data-act="kbd">⌨ Teclado</button>
+  <button data-key="esc">Esc</button>
+  <button data-key="tab">Tab</button>
+  <button data-key="enter">Enter</button>
+  <button data-mod="ctrl">Ctrl</button>
+  <button data-mod="alt">Alt</button>
+  <button data-key="up">↑</button>
+  <button data-key="down">↓</button>
+  <button data-key="left">←</button>
+  <button data-key="right">→</button>
+  <button data-key="win">Win</button>
+  <button data-act="cad">Ctrl+Alt+Del</button>
+  <button data-act="rclick">Clique dir.</button>
+  <button data-act="full">Tela cheia</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/v86@0.5.476/build/libv86.js"></script>
+<script>
+const V86_BASE = "https://cdn.jsdelivr.net/npm/v86@0.5.476/build/";
+const BIOS_BASE = "https://cdn.jsdelivr.net/gh/copy/v86@master/bios/";
+
+// PS/2 set-1 scancodes (press; release = code | 0x80). Extended keys prefixed with 0xE0.
+const SC = {
+  esc:[0x01], tab:[0x0F], enter:[0x1C], ctrl:[0x1D], alt:[0x38], shift:[0x2A], bksp:[0x0E],
+  up:[0xE0,0x48], down:[0xE0,0x50], left:[0xE0,0x4B], right:[0xE0,0x4D], win:[0xE0,0x5B], del:[0xE0,0x53],
+};
+const press = k => SC[k];
+const release = k => SC[k].length === 2 ? [0xE0, SC[k][1] | 0x80] : [SC[k][0] | 0x80];
+
+let emu = null;
+const mods = { ctrl:false, alt:false };
+const $ = id => document.getElementById(id);
+const status = t => $("status").textContent = t;
+
+$("start").onclick = () => {
+  const iso = $("iso").files[0], hda = $("hda").files[0];
+  if (!iso && !hda) { status("Escolha uma ISO ou um disco .img."); return; }
+  status("Carregando emulador…");
+  const cfg = {
+    wasm_path: V86_BASE + "v86.wasm",
+    memory_size: +$("mem").value * 1024 * 1024,
+    vga_memory_size: 8 * 1024 * 1024,
+    screen_container: $("screen_container"),
+    bios: { url: BIOS_BASE + "seabios.bin" },
+    vga_bios: { url: BIOS_BASE + "vgabios.bin" },
+    acpi: true,
+    autostart: true,
+  };
+  if (iso) cfg.cdrom = { buffer: iso };
+  if (hda) cfg.hda = { buffer: hda };
+  if (iso && hda) cfg.boot_order = 0x123; // CD primeiro, depois HD
+  emu = new V86(cfg);
+  emu.add_listener("emulator-started", () => {
+    $("setup").style.display = "none";
+    $("bar").style.display = "flex";
+  });
+  emu.add_listener("download-error", () => status("Erro ao baixar BIOS/emulador. Verifique a internet."));
+};
+
+/* ---------- Teclado virtual (celular) ---------- */
+const kbd = $("kbd");
+let lastKeyWasIME = false;
+
+function sendKey(k) {
+  const codes = [];
+  if (mods.ctrl) codes.push(...press("ctrl"));
+  if (mods.alt) codes.push(...press("alt"));
+  codes.push(...press(k), ...release(k));
+  if (mods.alt) codes.push(...release("alt"));
+  if (mods.ctrl) codes.push(...release("ctrl"));
+  emu.keyboard_send_scancodes(codes);
+  clearMods();
+}
+function sendText(t) {
+  if (mods.ctrl || mods.alt) {
+    // Ctrl/Alt + letra: segura o modificador e manda o texto
+    const pre = [], post = [];
+    if (mods.ctrl) { pre.push(...press("ctrl")); post.push(...release("ctrl")); }
+    if (mods.alt) { pre.push(...press("alt")); post.push(...release("alt")); }
+    emu.keyboard_send_scancodes(pre);
+    emu.keyboard_send_text(t);
+    emu.keyboard_send_scancodes(post);
+    clearMods();
+  } else {
+    emu.keyboard_send_text(t);
+  }
+}
+function clearMods() {
+  mods.ctrl = mods.alt = false;
+  document.querySelectorAll("[data-mod]").forEach(b => b.classList.remove("on"));
+}
+
+// Teclado físico é tratado pelo próprio v86 (a classe phone_keyboard deixa ele ouvir este campo).
+// Teclados de celular mandam keyCode 229 — nesses casos pegamos o texto pelo evento "input".
+kbd.addEventListener("keydown", e => { lastKeyWasIME = (e.keyCode === 229 || e.key === "Unidentified"); });
+kbd.addEventListener("beforeinput", e => {
+  if (!emu || !lastKeyWasIME) return;
+  if (e.inputType === "deleteContentBackward") sendKey("bksp");
+  else if (e.inputType === "insertLineBreak" || e.inputType === "insertParagraph") sendKey("enter");
+  else if (e.data) sendText(e.data);
+  e.preventDefault();
+});
+kbd.addEventListener("input", () => { kbd.value = ""; });
+
+/* ---------- Barra de botões ---------- */
+$("bar").addEventListener("pointerdown", e => e.stopPropagation(), true);
+$("bar").addEventListener("mousedown", e => e.stopPropagation(), true);
+$("bar").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b || !emu) return;
+  e.stopPropagation();
+  if (b.dataset.key) { sendKey(b.dataset.key); }
+  else if (b.dataset.mod) { mods[b.dataset.mod] = !mods[b.dataset.mod]; b.classList.toggle("on", mods[b.dataset.mod]); }
+  else if (b.dataset.act === "kbd") { kbd.focus(); return; }
+  else if (b.dataset.act === "cad") {
+    emu.keyboard_send_scancodes([0x1D, 0x38, 0xE0, 0x53, 0xE0, 0xD3, 0xB8, 0x9D]);
+  }
+  else if (b.dataset.act === "rclick") { click(false, true); }
+  else if (b.dataset.act === "full") {
+    const el = document.documentElement;
+    (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+  }
+  if (document.activeElement === kbd) kbd.focus();
+});
+
+/* ---------- Toque → mouse (estilo touchpad) ----------
+   Arrastar 1 dedo = mover cursor · toque rápido = clique esquerdo
+   toque com 2 dedos = clique direito · arrastar 2 dedos = rolar
+   segurar e arrastar = arrastar com botão pressionado */
+const scr = $("screen_container");
+const SPEED = 1.6;
+let t0 = 0, last = null, moved = 0, fingers = 0, holdTimer = null, dragging = false;
+
+function click(left, right) {
+  emu.bus.send("mouse-click", [left, false, right]);
+  setTimeout(() => emu.bus.send("mouse-click", [false, false, false]), 60);
+}
+function mid(t) {
+  let x = 0, y = 0;
+  for (const p of t) { x += p.clientX; y += p.clientY; }
+  return { x: x / t.length, y: y / t.length };
+}
+scr.addEventListener("touchstart", e => {
+  e.preventDefault(); e.stopPropagation();
+  if (!emu) return;
+  fingers = Math.max(fingers, e.touches.length);
+  if (e.touches.length === 1) {
+    t0 = Date.now(); moved = 0; fingers = 1;
+    holdTimer = setTimeout(() => {
+      if (moved < 8) { dragging = true; emu.bus.send("mouse-click", [true, false, false]); }
+    }, 450);
+  }
+  last = mid(e.touches);
+}, { passive:false });
+
+scr.addEventListener("touchmove", e => {
+  e.preventDefault(); e.stopPropagation();
+  if (!emu || !last) return;
+  const p = mid(e.touches), dx = p.x - last.x, dy = p.y - last.y;
+  moved += Math.abs(dx) + Math.abs(dy);
+  if (e.touches.length >= 2) {
+    if (Math.abs(dy) > 12) { emu.bus.send("mouse-wheel", [dy > 0 ? -1 : 1, 0]); last = p; }
+    return;
+  }
+  emu.bus.send("mouse-delta", [dx * SPEED, -dy * SPEED]);
+  last = p;
+}, { passive:false });
+
+scr.addEventListener("touchend", e => {
+  e.preventDefault(); e.stopPropagation();
+  if (!emu) return;
+  if (e.touches.length > 0) { last = mid(e.touches); return; }
+  clearTimeout(holdTimer);
+  if (dragging) { emu.bus.send("mouse-click", [false, false, false]); dragging = false; }
+  else if (Date.now() - t0 < 300 && moved < 10) {
+    if (fingers >= 2) click(false, true); else click(true, false);
+  }
+  last = null; fingers = 0;
+}, { passive:false });
+</script>
+</body>
+</html>
