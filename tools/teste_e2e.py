@@ -21,9 +21,9 @@ def req(url, metodo="GET", dados=None, cab=None, timeout=60):
                                headers={"Content-Type": "application/json", "X-OneMapas": "1", **(cab or {})})
     try:
         with urllib.request.urlopen(r, timeout=timeout) as resp:
-            return resp.status, dict(resp.headers), resp.read().decode(errors="replace")
+            return resp.status, {k.lower(): v for k, v in resp.headers.items()}, resp.read().decode(errors="replace")
     except urllib.error.HTTPError as e:
-        return e.code, dict(e.headers), e.read().decode(errors="replace")
+        return e.code, {k.lower(): v for k, v in e.headers.items()}, e.read().decode(errors="replace")
     except Exception as e:
         return None, {}, str(e)
 
@@ -78,8 +78,8 @@ try:
 
     url = f"{GW}/_site/{NOME}/?sistema=onemapasoficealOS&site=true&load=conectado"
     st, h, c = req(url)
-    ok("Visitante recebe o site vindo do PC", st == 200 and "Teste E2E OneMapas" in c and h.get("X-OneMapas-Origem") == "pc",
-       f"HTTP {st} origem={h.get('X-OneMapas-Origem')}")
+    ok("Visitante recebe o site vindo do PC", st == 200 and "Teste E2E OneMapas" in c and h.get("x-onemapas-origem") == "pc",
+       f"HTTP {st} origem={h.get('x-onemapas-origem')}")
     st, h, c = req(f"{GW}/_site/{NOME}/style.css")
     ok("style.css vem do PC", st == 200 and "--cor" in c)
 
@@ -95,10 +95,10 @@ time.sleep(38)
 st, h, c = req(f"{GW}/_site/{NOME}/_onemapas/estado")
 ok("Render sabe que o PC desligou e que há cópia", st == 200 and json.loads(c) == {"site": NOME, "online": False, "copia": True}, c)
 st, h, c = req(url)
-ok("Visitante recebe a CÓPIA do Supabase", st == 200 and "Teste E2E OneMapas" in c and h.get("X-OneMapas-Origem") == "copia-supabase",
-   f"HTTP {st} origem={h.get('X-OneMapas-Origem')}")
+ok("Visitante recebe a CÓPIA do Supabase", st == 200 and "Teste E2E OneMapas" in c and h.get("x-onemapas-origem") == "copia-supabase",
+   f"HTTP {st} origem={h.get('x-onemapas-origem')}")
 st, h, c = req(f"{GW}/_site/{NOME}/style.css")
-ok("style.css vem da cópia", st == 200 and "--cor" in c and h.get("X-OneMapas-Origem") == "copia-supabase")
+ok("style.css vem da cópia", st == 200 and "--cor" in c and h.get("x-onemapas-origem") == "copia-supabase")
 
 # 4) limpeza: liga o PC de novo e apaga o site (registro + cópia)
 pc = ligar_pc()
