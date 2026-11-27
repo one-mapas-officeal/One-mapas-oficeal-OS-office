@@ -339,7 +339,10 @@ async function appIso(c, _o, jid) {
             <tr><td>Tamanho</td><td>${i.tamanho_mb ? esc(i.tamanho_mb) + " MB" : "—"}</td></tr>
             <tr><td>SHA-256</td><td style="word-break:break-all">${esc(i.sha256 || "—")}</td></tr>
           </table>
-          ${i.download ? `<p><a class="btn prim" href="${esc(i.download)}" target="_blank" rel="noopener">⬇ Baixar ISO</a></p>` : `<p class="mudo">Download disponível quando o build terminar.</p>`}
+          <div class="linha" style="margin-top:8px">
+            ${i.download ? `<a class="btn prim" href="${esc(i.download)}" target="_blank" rel="noopener">⬇ Baixar ISO</a>` : `<span class="mudo">Download disponível quando o build terminar.</span>`}
+            ${i.build ? `<a class="btn" href="${esc(i.build)}" target="_blank" rel="noopener">Ver build ao vivo ↗</a>` : ""}
+          </div>
         </div>`).join("")}`;
     c.querySelectorAll(".abas button").forEach((b) => b.onclick = () => { canal = b.dataset.c; pref.set("isoCanal", canal); pintar(); });
   };

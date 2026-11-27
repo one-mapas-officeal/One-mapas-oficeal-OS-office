@@ -1,6 +1,11 @@
 name: Construir ISO
 
+# Começa sozinho quando ISO/pedido-build.json muda (canal e versão vêm dele),
+# ou pelo botão "Run workflow" (quando este arquivo estiver no branch principal).
 on:
+  push:
+    paths:
+      - ISO/pedido-build.json
   workflow_dispatch:
     inputs:
       canal:
@@ -15,47 +20,67 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: iso-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   iso:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
+    container:
+      image: debian:bookworm
+      options: --privileged
     steps:
+      - name: Ferramentas (git, live-build, gh)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates curl python3 \
+            live-build debootstrap squashfs-tools xorriso mtools dosfstools \
+            grub-pc-bin grub-efi-amd64-bin syslinux syslinux-common isolinux gh
+
       - uses: actions/checkout@v4
 
-      - name: Instalar live-build (Debian)
+      - name: Canal e versão
         run: |
-          sudo apt-get update
-          sudo apt-get install -y debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin mtools dosfstools syslinux syslinux-common isolinux
-          # live-build do Debian (o do Ubuntu é antigo demais)
-          curl -fsSLo /tmp/lb.deb http://deb.debian.org/debian/pool/main/l/live-build/live-build_20230502_all.deb || true
-          sudo apt-get install -y /tmp/lb.deb || sudo apt-get install -y live-build
-          sudo apt-get install -y debian-archive-keyring || true
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.name "OneMapas Bot"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CANAL="${{ inputs.canal }}"; VERSAO="${{ inputs.versao }}"
+          else
+            CANAL=$(python3 -c 'import json;print(json.load(open("ISO/pedido-build.json"))["canal"])')
+            VERSAO=$(python3 -c 'import json;print(json.load(open("ISO/pedido-build.json"))["versao"])')
+          fi
+          echo "$CANAL $VERSAO" | grep -Eq '^[a-z-]+ [0-9A-Za-z.-]+$' || { echo "canal/versão inválidos"; exit 1; }
+          echo "CANAL=$CANAL" >> "$GITHUB_ENV"
+          echo "VERSAO=$VERSAO" >> "$GITHUB_ENV"
+          echo "URL_BUILD=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> "$GITHUB_ENV"
 
-      - name: Marcar progresso (build em andamento)
+      - name: Progresso, build iniciado
         run: |
-          python3 tools/atualizar_manifest.py "${{ inputs.canal }}" "${{ inputs.versao }}" /nao-existe "" "construindo" 80
-          git config user.name "OneMapas Bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add ISO && git commit -m "ISO ${{ inputs.canal }} ${{ inputs.versao }}: build iniciado" && git push || true
+          ./tools/progresso_ci.sh "construindo: iniciando" 70
 
       - name: Construir ISO
-        run: sudo ./os/build-iso.sh "${{ inputs.canal }}" "${{ inputs.versao }}"
+        env:
+          ONEMAPAS_PROGRESSO: ${{ github.workspace }}/tools/progresso_ci.sh
+        run: ./os/build-iso.sh "$CANAL" "$VERSAO"
 
-      - name: Publicar no Releases
+      - name: Publicar nos Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="iso-${{ inputs.canal }}-${{ inputs.versao }}"
+          TAG="iso-$CANAL-$VERSAO"
           ISO=$(ls out/*.iso)
-          gh release create "$TAG" "$ISO" "$ISO.sha256" --title "OneMapas OS ${{ inputs.versao }} (${{ inputs.canal }})" \
-            --notes "ISO gerada automaticamente. Veja ISO/${{ inputs.canal }}/${{ inputs.versao }}/" --prerelease \
-            || gh release upload "$TAG" "$ISO" "$ISO.sha256" --clobber
-          echo "URL=https://github.com/${{ github.repository }}/releases/download/$TAG/$(basename $ISO)" >> $GITHUB_ENV
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --target "$GITHUB_SHA" \
+            --title "OneMapas OS $VERSAO ($CANAL)" --prerelease \
+            --notes "ISO gerada automaticamente pelo GitHub Actions. Pasta: ISO/$CANAL/$VERSAO/"
+          gh release upload "$TAG" "$ISO" "$ISO.sha256" --clobber
+          echo "URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$TAG/$(basename "$ISO")" >> "$GITHUB_ENV"
 
-      - name: Atualizar ISO/manifest.json
-        run: |
-          git pull --rebase || true
-          python3 tools/atualizar_manifest.py "${{ inputs.canal }}" "${{ inputs.versao }}" out/*.iso "$URL" "pronta" 100
-          git add ISO
-          git commit -m "ISO ${{ inputs.canal }} ${{ inputs.versao }}: pronta"
-          git push
+      - name: Progresso, pronta
+        run: ./tools/progresso_ci.sh "pronta" 100 out/*.iso "$URL"
+
+      - name: Progresso, falhou
+        if: failure()
+        run: ./tools/progresso_ci.sh "falhou (veja o log do build)" 70 || true

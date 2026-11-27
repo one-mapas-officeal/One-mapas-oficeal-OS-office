@@ -21,8 +21,8 @@
       "nome": "onemapas-os-0.1.0-beta-amd64.iso",
       "arquitetura": "amd64",
       "base": "Debian 12 (bookworm)",
-      "status": "aguardando build",
-      "progresso": 65,
+      "status": "na fila do GitHub Actions",
+      "progresso": 70,
       "etapas": [
         {
           "nome": "Interface Windows / Mint / Mac",
@@ -49,8 +49,8 @@
           "feito": true
         },
         {
-          "nome": "Gateway no ar em onemapasos.oficeal.com",
-          "feito": false
+          "nome": "Gateway no ar (onemapas-gateway.onrender.com + Supabase)",
+          "feito": true
         },
         {
           "nome": "Build da ISO no GitHub Actions",

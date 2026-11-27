@@ -1,6 +1,18 @@
 {
   "novidades": [
     {
+      "versao": "0.4.1",
+      "canal": "beta",
+      "data": "27/11/2026",
+      "titulo": "ISO sendo montada no GitHub Actions",
+      "itens": [
+        "A ISO é montada sozinha quando ISO/pedido-build.json muda",
+        "A aba Progresso da ISO mostra cada etapa ao vivo: sistema base → pacotes e drivers → imagem → pronta",
+        "Link \"Ver build ao vivo\" e, no fim, o botão \"Baixar ISO\" (Releases do GitHub)",
+        "A ISO liga direto no OneMapas OS, já apontando para onemapas-gateway.onrender.com"
+      ]
+    },
+    {
       "versao": "0.4.0",
       "canal": "beta",
       "data": "27/11/2026",

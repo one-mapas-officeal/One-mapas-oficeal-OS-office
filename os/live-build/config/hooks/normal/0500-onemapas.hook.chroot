@@ -1,6 +1,7 @@
 #!/bin/sh
 # Ajustes dentro do sistema durante o build
 set -e
+mkdir -p /etc/skel/.config
 sed -i 's/^# *pt_BR.UTF-8/pt_BR.UTF-8/' /etc/locale.gen && locale-gen
 chmod +x /usr/local/sbin/onemapas-net /usr/local/bin/onemapas-sessao
 systemctl enable onemapas-net.service
