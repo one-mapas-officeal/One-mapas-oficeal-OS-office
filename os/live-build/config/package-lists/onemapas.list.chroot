@@ -6,7 +6,7 @@ xinit
 lightdm
 openbox
 unclutter
-xterm
+lxterminal
 chromium
 fonts-noto
 fonts-noto-color-emoji

@@ -1,5 +1,6 @@
 {
   "descricao": "Mude este arquivo (canal/versão) e envie para o GitHub: o Actions monta a ISO sozinho.",
   "canal": "beta",
-  "versao": "0.1.0"
+  "versao": "0.1.0",
+  "tentativa": 2
 }
