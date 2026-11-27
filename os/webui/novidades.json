@@ -1,6 +1,21 @@
 {
   "novidades": [
     {
+      "versao": "0.3.0",
+      "canal": "beta",
+      "data": "27/11/2026",
+      "titulo": "O site roda no seu PC",
+      "itens": [
+        "Endereço do site: https://<nome>.onemapasos.oficeal.com/?sistema=onemapasoficealOS&site=true&load=em-espera",
+        "Caminho: visitante → Render → seu PC → Render → visitante",
+        "O PC se conecta ao Render sozinho, sem abrir portas no roteador (funciona com CGNAT e 4G)",
+        "Tela de espera (load=em-espera) enquanto o Render liga o visitante ao seu PC",
+        "Se o PC desligar, o visitante vê \"O PC do dono está desligado\", e o site volta sozinho quando o PC liga",
+        "A pasta do site fica na Área de Trabalho do PC (Meus Sites OneMapas), e o PC é o dono",
+        "Novo app: Conexão com o Render (túnel, pedidos atendidos, erros)"
+      ]
+    },
+    {
       "versao": "0.2.0",
       "canal": "beta",
       "data": "27/11/2026",

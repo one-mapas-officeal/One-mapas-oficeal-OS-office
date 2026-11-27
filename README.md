@@ -5,27 +5,36 @@ This is an operating system from One Maps Office. DO NOT COPY THIS SYSTEM. WE AR
 
 # OneMapas OS
 
-Sistema da One Mapas Office para **criar sites**, rodando como **servidor web** (Render) em
-`https://onemapasoficeal.com.br`. A interface (área de trabalho no navegador) fica em `/`,
-e cada site criado fica em `/<nome>`.
+Sistema da One Mapas Office para **criar sites que rodam no seu próprio PC**.
 
-O usuário digita a URL que quer, por exemplo `https://onemapasoficeal.com.br/oi`, e o sistema responde:
+Endereço de um site:
 
-- **SIM**: o site é criado no servidor e aparece como uma **pasta na Área de Trabalho** do OneMapas OS,
-  onde o dono abre e edita os arquivos (HTML, CSS, JS…).
-- **NÃO**: aparece **"Escolha outra URL"**.
+```
+https://[URL escolhida].onemapasos.oficeal.com/?sistema=onemapasoficealOS&site=true&load=em-espera
+```
 
-### Quem é o dono
-Quem cria o site é o dono. O navegador recebe uma **chave secreta** (Configurações > Chave do dono),
-e o servidor guarda só o hash dela. Com a chave, o dono edita os sites de qualquer PC.
-Guarde uma cópia da chave: sem ela, não dá para editar os sites.
+## Como funciona
 
-### Onde os sites ficam guardados
-O Render apaga o disco a cada deploy. Por isso cada mudança também é gravada no GitHub (`sites/<nome>/`),
-usando a variável `GITHUB_TOKEN` do Render. O próximo deploy já traz os sites de volta.
-Os sites rodam isolados (CSP sandbox) e não conseguem mexer no OneMapas OS, mesmo estando no mesmo domínio.
+```
+Cliente (navegador) ──► Render ──► PC do dono (onde o site roda)
+Cliente ◄────────────── Render ◄── PC
+```
 
-## Interface
+1. **Cliente → Render**: o visitante abre `https://oi.onemapasos.oficeal.com`. O Render mostra a tela de espera (`load=em-espera`).
+2. **Render → PC**: o Render repassa o pedido para o PC dono do site `oi`.
+3. **PC → Render → Cliente**: o PC lê a pasta do site na Área de Trabalho e responde. O Render entrega ao visitante (`load=conectado`).
+
+O PC **se conecta ao Render primeiro** e fica esperando pedidos (túnel por *long-polling*).
+Por isso funciona em internet de casa ou 4G com CGNAT, sem abrir portas no roteador e sem IP fixo.
+Se o PC desligar, o visitante vê "O PC do dono está desligado", e o site volta sozinho quando o PC liga.
+
+### Criando um site (no PC)
+O usuário digita a URL e o sistema pergunta ao Render: *está disponível?*
+- **SIM**: o nome fica registrado para este PC, e a pasta `Área de Trabalho/Meus Sites OneMapas/<nome>/` é criada.
+  O PC é o dono (tem uma chave secreta em `~/.config/onemapas/config.json`; o Render guarda só o hash).
+- **NÃO**: **"Escolha outra URL"**.
+
+## Interface (no PC)
 
 | Estilo | Como fica |
 |---|---|
@@ -33,37 +42,38 @@ Os sites rodam isolados (CSP sandbox) e não conseguem mexer no OneMapas OS, mes
 | Linux Mint | painel escuro, botão "Iniciar" verde, botões redondos |
 | Mac | barra de menus no topo, Dock, botões vermelho/amarelo/verde |
 
-Aplicativos: Criador de Sites, Área de Trabalho (Meus Sites), Editor, **Novidades**, **Progresso da ISO**,
-Servidor e Rede, Terminal, Configurações.
+Aplicativos: Criador de Sites, Área de Trabalho, Editor, **Novidades**, **Progresso da ISO**,
+Conexão com o Render, Terminal, Configurações.
 
 ## Estrutura
 
 ```
 os/
-  backend/onemapas_server.py   servidor web (Python, sem dependências)
-  webui/                       interface (servida em /_os/) + novidades.json
-  network/                     drivers de rede da ISO: onemapas-net, serviço, modprobe, NetworkManager
-  live-build/                  configuração da ISO (Debian 12; abre o servidor web em tela cheia)
-  build-iso.sh                 gera a ISO
-ISO/
-  manifest.json                índice das ISOs (canal, versão, pasta, nome, progresso, sha256, download)
-  <canal>/<versão>/            ex.: ISO/beta/0.1.0/ (info.json + .sha256; a .iso fica nos Releases)
-sites/                         sites criados (cópia no GitHub)
-render.yaml                    configuração do Render
-.github/workflows/build-iso.yml  gera a ISO e atualiza o manifest
-tools/atualizar_manifest.py
+  render/gateway.py   roda no Render: portal, registro dos nomes, túnel e proxy dos sites
+  pc/onemapas_pc.py   roda no PC: interface, pasta dos sites e túnel até o Render
+  webui/              interface gráfica + novidades.json
+  network/            drivers de rede da ISO (onemapas-net, serviço, modprobe, NetworkManager)
+  live-build/         configuração da ISO (Debian 12)
+  build-iso.sh        gera a ISO
+registro/             quais nomes pertencem a qual PC (o gateway grava aqui via GitHub)
+ISO/manifest.json     índice das ISOs;  ISO/<canal>/<versão>/
+render.yaml           configuração do Render
 ```
 
-## Colocar no ar (Render)
+## Colocar no ar
 
-1. No Render: **New > Blueprint** e escolha este repositório (usa o `render.yaml`).
-2. Em *Environment*, defina `GITHUB_TOKEN`: um token *fine-grained* só deste repositório, com **Contents: Read and write**.
-3. Em *Settings > Custom Domains*, adicione `onemapasoficeal.com.br` e aponte o DNS como o Render indicar.
+**1. Domínio** (`oficeal.com`, no painel de DNS de onde ele foi comprado):
+- `onemapasos.oficeal.com`: CNAME para o endereço `.onrender.com` do serviço
+- `*.onemapasos.oficeal.com`: CNAME para o mesmo endereço (DNS curinga: é o que faz `[URL].onemapasos.oficeal.com` funcionar)
 
-Para testar no seu computador: `python3 os/backend/onemapas_server.py` e abra `http://127.0.0.1:8080`.
+**2. Render**: *New > Blueprint* com este repositório (usa o `render.yaml`).
+- Em *Environment*, defina `GITHUB_TOKEN` (token só deste repositório, **Contents: Read and write**). É onde o registro dos nomes é guardado.
+- Em *Custom Domains*, adicione `onemapasos.oficeal.com` e `*.onemapasos.oficeal.com`.
+- Use o plano **Starter** ou maior: o plano grátis "dorme" e derruba os túneis.
 
-API: `GET /api/verificar?nome=oi`, `POST /api/criar`, `GET /api/meus-sites`,
-`GET|PUT|DELETE /api/sites/<nome>/arquivo`, `DELETE /api/sites/<nome>`, `GET /api/manifest`, `GET /api/novidades`, `GET /api/status`.
+**3. PC**: instale a ISO, ou rode `python3 os/pc/onemapas_pc.py` e abra `http://127.0.0.1:8080`.
+
+Para testar sem DNS: `https://<serviço>.onrender.com/_site/<nome>/`.
 
 ## ISO
 

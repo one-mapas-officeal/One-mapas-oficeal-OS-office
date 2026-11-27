@@ -22,18 +22,18 @@
       "arquitetura": "amd64",
       "base": "Debian 12 (bookworm)",
       "status": "aguardando build",
-      "progresso": 70,
+      "progresso": 65,
       "etapas": [
         {
-          "nome": "Servidor web (Render) + interface Windows / Mint / Mac",
+          "nome": "Interface Windows / Mint / Mac",
           "feito": true
         },
         {
-          "nome": "Criador de sites + verificação de URL",
+          "nome": "Gateway no Render (Cliente → Render → PC → Render → Cliente)",
           "feito": true
         },
         {
-          "nome": "Área de Trabalho virtual + editor",
+          "nome": "Túnel do PC + pasta do site na Área de Trabalho",
           "feito": true
         },
         {
@@ -41,8 +41,12 @@
           "feito": true
         },
         {
-          "nome": "Configuração do live-build (abre o servidor web)",
+          "nome": "Configuração do live-build",
           "feito": true
+        },
+        {
+          "nome": "Gateway no ar em onemapasos.oficeal.com",
+          "feito": false
         },
         {
           "nome": "Build da ISO no GitHub Actions",

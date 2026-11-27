@@ -1,4 +1,4 @@
-/* OneMapas OS: área de trabalho no navegador, servida por https://onemapasoficeal.com.br */
+/* OneMapas OS: área de trabalho do PC. O PC roda o site; o Render faz a ponte com os visitantes. */
 "use strict";
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -10,19 +10,6 @@ const pref = {
   set(k, v) { try { localStorage.setItem("onemapas." + k, JSON.stringify(v)); } catch {} },
 };
 
-/* ---------------- chave do dono ----------------
-   Quem cria um site recebe uma chave secreta que fica neste navegador.
-   O servidor guarda só o hash dela. Com a chave, o dono edita os sites de qualquer PC. */
-function chaveDono() {
-  let k = pref.get("chave", "");
-  if (!/^[A-Za-z0-9_-]{32,128}$/.test(k)) {
-    const b = new Uint8Array(32); crypto.getRandomValues(b);
-    k = btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    pref.set("chave", k);
-  }
-  return k;
-}
-
 /* ---------------- API do servidor ---------------- */
 const api = {
   status: null,
@@ -30,12 +17,12 @@ const api = {
     try {
       const r = await fetch("/api" + rota, {
         method: metodo, cache: "no-store",
-        headers: { "Content-Type": "application/json", "X-Dono-Chave": chaveDono() },
+        headers: { "Content-Type": "application/json", "X-OneMapas": "1" },
         body: dados ? JSON.stringify(dados) : undefined,
       });
       let corpo = {}; try { corpo = await r.json(); } catch {}
       return { status: r.status, ok: r.ok, ...corpo };
-    } catch (e) { return { status: 0, ok: false, mensagem: "Sem conexão com o servidor." }; }
+    } catch (e) { return { status: 0, ok: false, mensagem: "O OneMapas OS deste PC não está rodando." }; }
   },
   get(r) { return this.req("GET", r); },
   post(r, d) { return this.req("POST", r, d); },
@@ -44,14 +31,15 @@ const api = {
   async ping() {
     const s = await this.get("/status");
     this.status = s.ok ? s : null;
+    const no_ar = !!this.status && this.status.tunel.tunel === "conectado";
     const b = $("#bandeja-backend");
-    b.classList.toggle("on", !!this.status);
-    b.title = this.status ? `Servidor online · ${this.status.sites} sites` : "Servidor fora do ar";
-    if (this.status) $("#menu-dono").textContent = this.status.dominio.replace(/^https?:\/\//, "");
+    b.classList.toggle("on", no_ar);
+    b.title = no_ar ? `PC conectado ao Render · ${this.status.sites} site(s) no ar` : "PC desconectado do Render: os sites estão fora do ar";
+    if (this.status) $("#menu-dono").textContent = "Dono: " + this.status.dono;
     return !!this.status;
   },
 };
-const DOMINIO = () => (api.status?.dominio || location.origin);
+const DOMINIO_SITES = () => (api.status?.dominio_sites || "onemapasos.oficeal.com");
 
 /* ---------------- notificações ---------------- */
 function notificar(titulo, texto = "") {
@@ -149,7 +137,7 @@ const APPS = {
   editor: { nome: "Editor", emoji: "📝", largura: 860, altura: 600, abrir: appEditor },
   novidades: { nome: "Novidades", emoji: "📰", largura: 560, altura: 520, abrir: appNovidades },
   iso: { nome: "Progresso da ISO", emoji: "💿", largura: 620, altura: 560, abrir: appIso },
-  rede: { nome: "Servidor e Rede", emoji: "📶", largura: 540, altura: 440, abrir: appRede },
+  rede: { nome: "Conexão com o Render", emoji: "📶", largura: 540, altura: 440, abrir: appRede },
   terminal: { nome: "Terminal", emoji: "⌨️", largura: 640, altura: 400, abrir: appTerminal },
   config: { nome: "Configurações", emoji: "⚙️", largura: 600, altura: 600, abrir: appConfig },
   sobre: { nome: "Sobre o OneMapas OS", emoji: "ℹ️", largura: 460, altura: 380, abrir: appSobre },
@@ -158,12 +146,11 @@ const FIXADOS = ["criador", "arquivos", "novidades", "iso", "rede", "terminal", 
 
 /* ---- Criador de Sites ---- */
 function appCriador(c) {
-  const dom = DOMINIO().replace(/^https?:\/\//, "");
   c.innerHTML = `
     <h2>Criar um novo site</h2>
-    <p class="mudo">Digite o endereço que você quer. O servidor confere se ele está livre.</p>
+    <p class="mudo">Digite o endereço que você quer. O Render confere se ele está livre. O site vai rodar neste PC.</p>
     <div class="campo"><label>URL do site</label>
-      <div class="url-linha"><span>${esc(dom)}/</span><input type="text" id="cs-nome" placeholder="oi" maxlength="63"></div></div>
+      <div class="url-linha"><span>https://</span><input type="text" id="cs-nome" placeholder="oi" maxlength="63" style="text-align:right"><span style="padding-right:10px">.${esc(DOMINIO_SITES())}</span></div></div>
     <div class="linha"><button class="btn prim" id="cs-verificar">Está disponível?</button></div>
     <div id="cs-resp"></div>
     <div id="cs-form" hidden>
@@ -171,7 +158,7 @@ function appCriador(c) {
       <div class="campo"><label>Título</label><input type="text" id="cs-titulo" maxlength="120"></div>
       <div class="campo"><label>Texto da página inicial</label><textarea id="cs-desc" rows="3" placeholder="Bem-vindo ao meu site!"></textarea></div>
       <div class="linha"><label>Cor principal <input type="color" id="cs-cor" value="#2563eb"></label></div>
-      <p class="mudo">A pasta do site aparece na sua <b>Área de Trabalho</b>. Você (este navegador) será o dono.</p>
+      <p class="mudo">A pasta do site será criada na <b>Área de Trabalho</b> deste PC (Meus Sites OneMapas). Este PC é o dono e o servidor do site.</p>
       <div class="linha"><button class="btn prim" id="cs-criar">Criar site</button></div>
     </div>`;
   const nome = $("#cs-nome", c), resp = $("#cs-resp", c), form = $("#cs-form", c);
@@ -181,7 +168,7 @@ function appCriador(c) {
 
   $("#cs-verificar", c).onclick = async () => {
     if (!nome.value) { nome.focus(); return; }
-    resp.innerHTML = `<div class="resposta">Perguntando: a URL <b>${esc(DOMINIO())}/${esc(nome.value)}</b> está disponível?…</div>`;
+    resp.innerHTML = `<div class="resposta">Perguntando ao Render: a URL <b>https://${esc(nome.value)}.${esc(DOMINIO_SITES())}</b> está disponível?…</div>`;
     const v = await api.get("/verificar?nome=" + encodeURIComponent(nome.value));
     if (v.status === 0) { resp.innerHTML = `<div class="resposta nao">${esc(v.mensagem)}</div>`; return; }
     ultimo = v;
@@ -201,11 +188,11 @@ function appCriador(c) {
     $("#cs-criar", c).disabled = false;
     if (r.status === 201) {
       form.hidden = true;
-      resp.innerHTML = `<div class="resposta sim"><b class="sim">Site criado!</b><br>🌐 <a href="${esc(r.url)}/" target="_blank" rel="noopener">${esc(r.url)}</a>
-        <div class="mudo">${r.salvo_no_github ? "✅ Salvo também no GitHub." : "⚠️ O servidor não tem GITHUB_TOKEN: o site some no próximo deploy."}</div></div>
+      resp.innerHTML = `<div class="resposta sim"><b class="sim">Site criado!</b><br>📁 ${esc(r.pasta)}<br>🌐 <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a>
+        <div class="mudo">O site fica no ar enquanto este PC estiver ligado e conectado.</div></div>
         <div class="linha"><button class="btn prim" id="cs-editar">Editar arquivos</button><button class="btn" id="cs-ver">Ver site</button></div>`;
       $("#cs-editar", c).onclick = () => abrirApp("editor", { site: r.nome });
-      $("#cs-ver", c).onclick = () => window.open(r.url + "/", "_blank", "noopener");
+      $("#cs-ver", c).onclick = () => window.open(r.url, "_blank", "noopener");
       notificar("Site criado", r.url);
       carregarIcones();
     } else if (r.status === 409) {
@@ -223,7 +210,7 @@ async function appArquivos(c, _o, jid) {
   const pintar = async () => {
     const d = await api.get("/meus-sites");
     const sites = d.sites || [];
-    c.innerHTML = `<h2>Área de Trabalho</h2><p class="mudo">📂 Meus Sites OneMapas · ${sites.length} site(s)</p>
+    c.innerHTML = `<h2>Área de Trabalho</h2><p class="mudo">📂 ${esc(api.status?.pasta || "Meus Sites OneMapas")} · ${sites.length} site(s)</p>
       ${sites.length ? "" : `<p>Nenhum site ainda. Abra o <b>Criador de Sites</b>.</p>`}
       <div class="arquivos-grade">${sites.map((s) => `<div class="item" data-nome="${esc(s.nome)}" title="${esc(s.titulo)}"><span class="emoji">🗂️</span>${esc(s.nome)}</div>`).join("")}</div>
       <div id="ar-det"></div>`;
@@ -231,11 +218,12 @@ async function appArquivos(c, _o, jid) {
       it.ondblclick = () => abrirApp("editor", { site: it.dataset.nome });
       it.onclick = () => {
         const s = sites.find((x) => x.nome === it.dataset.nome);
-        $("#ar-det", c).innerHTML = `<div class="cartao"><b>${esc(s.titulo)}</b><br><a href="${esc(s.url)}/" target="_blank" rel="noopener">${esc(s.url)}</a>
+        $("#ar-det", c).innerHTML = `<div class="cartao"><b>${esc(s.titulo)}</b><br><a href="${esc(s.url)}" target="_blank" rel="noopener" style="word-break:break-all">${esc(s.url)}</a>
           <p class="mudo">Criado ${esc((s.criado_em || "").replace("T", " ").slice(0, 16))} · alterado ${esc((s.atualizado_em || "").replace("T", " ").slice(0, 16))}</p>
-          <div class="linha"><button class="btn prim" data-a="ed">Abrir pasta</button><button class="btn" data-a="ver">Ver online</button><button class="btn" data-a="del">Apagar site</button></div></div>`;
+          <div class="linha"><button class="btn prim" data-a="ed">Editar arquivos</button><button class="btn" data-a="fm">Abrir no gerenciador</button><button class="btn" data-a="ver">Ver online</button><button class="btn" data-a="del">Apagar site</button></div></div>`;
         $("[data-a=ed]", c).onclick = () => abrirApp("editor", { site: s.nome });
-        $("[data-a=ver]", c).onclick = () => window.open(s.url + "/", "_blank", "noopener");
+        $("[data-a=ver]", c).onclick = () => window.open(s.url, "_blank", "noopener");
+        $("[data-a=fm]", c).onclick = async () => { const r = await api.post("/abrir-pasta", { nome: s.nome }); if (!r.ok) notificar("Pasta", r.mensagem || ""); };
         $("[data-a=del]", c).onclick = async () => {
           if (prompt(`Para apagar, digite o nome do site: ${s.nome}`) !== s.nome) return;
           const r = await api.del("/sites/" + s.nome);
@@ -294,7 +282,7 @@ async function appEditor(c, { site }) {
     if (e.key === "Tab") { e.preventDefault(); const p = texto.selectionStart; texto.setRangeText("  ", p, texto.selectionEnd, "end"); }
   });
   $("#ed-salvar", c).onclick = salvar;
-  $("#ed-ver", c).onclick = () => window.open(`${DOMINIO()}/${site}/${atual && atual.endsWith(".html") ? atual : ""}`, "_blank", "noopener");
+  $("#ed-ver", c).onclick = async () => { const s = ((await api.get("/meus-sites")).sites || []).find((x) => x.nome === site); if (s?.url) window.open(s.url, "_blank", "noopener"); };
   $("#ed-novo", c).onclick = async () => {
     const cam = prompt("Nome do arquivo (ex.: sobre.html, js/app.js):");
     if (!cam) return;
@@ -358,22 +346,24 @@ async function appIso(c, _o, jid) {
   janelas.get(jid).limpar = () => clearInterval(t);
 }
 
-/* ---- Servidor e Rede ---- */
+/* ---- Conexão com o Render ---- */
 async function appRede(c) {
   const t0 = performance.now();
   await api.ping();
   const ms = Math.round(performance.now() - t0);
-  const s = api.status;
-  c.innerHTML = `<h2>Servidor e Rede</h2>
+  const s = api.status, t = s?.tunel || {};
+  const icone = { conectado: "✅ conectado", reconectando: "🔄 reconectando…", desligado: "⏸ iniciando…" };
+  c.innerHTML = `<h2>Conexão com o Render</h2>
+    <p class="mudo">Visitante → Render → <b>este PC</b> → Render → visitante</p>
     <table>
-      <tr><td>Sua internet</td><td>${navigator.onLine ? "✅ conectado" : "❌ offline"}${navigator.connection?.effectiveType ? " · " + esc(navigator.connection.effectiveType) : ""}</td></tr>
-      <tr><td>Servidor</td><td>${s ? `✅ online · ${ms} ms` : "❌ fora do ar"}</td></tr>
-      ${s ? `<tr><td>Domínio</td><td>${esc(s.dominio)}</td></tr>
-      <tr><td>Versão</td><td>${esc(s.versao)}</td></tr>
-      <tr><td>Sites hospedados</td><td>${esc(s.sites)}</td></tr>
-      <tr><td>Cópia no GitHub</td><td>${s.github.configurado ? "✅ ligada" : "⚠️ desligada (falta GITHUB_TOKEN no Render)"} · ${esc(s.github.repo)}@${esc(s.github.branch)}</td></tr>
-      <tr><td>Envios pendentes</td><td>${esc(s.github.pendentes)}</td></tr>
-      ${s.github.ultimo_erro ? `<tr><td>Último erro</td><td class="mudo">${esc(s.github.ultimo_erro)}</td></tr>` : ""}` : ""}
+      <tr><td>Internet</td><td>${navigator.onLine ? "✅ conectado" : "❌ offline"}</td></tr>
+      ${s ? `<tr><td>Render</td><td>${s.render_online ? "✅ online" : "❌ sem resposta"} · ${esc(s.servidor)}</td></tr>
+      <tr><td>Túnel</td><td>${icone[t.tunel] || esc(t.tunel)}</td></tr>
+      <tr><td>Sites neste PC</td><td>${esc(s.sites)}</td></tr>
+      <tr><td>Pedidos atendidos</td><td>${esc(t.pedidos_atendidos)}</td></tr>
+      <tr><td>Último pedido</td><td class="mudo">${esc(t.ultimo_pedido || "—")}</td></tr>
+      ${t.ultimo_erro ? `<tr><td>Último erro</td><td class="mudo">${esc(t.ultimo_erro)}</td></tr>` : ""}
+      <tr><td>Interface local</td><td>${ms} ms</td></tr>` : `<tr><td>OneMapas OS</td><td>❌ não está rodando</td></tr>`}
     </table>
     <div class="linha" style="margin-top:12px"><button class="btn" id="rd-at">Atualizar</button></div>`;
   $("#rd-at", c).onclick = () => appRede(c);
@@ -395,7 +385,7 @@ function appTerminal(c) {
     editar: (a) => { if (!a) return "uso: editar oi"; abrirApp("editor", { site: a }); return ""; },
     verificar: async (a) => { if (!a) return "uso: verificar oi"; const v = await api.get("/verificar?nome=" + encodeURIComponent(a)); return `${v.url}: ${v.disponivel ? "SIM, disponível" : "NÃO. Escolha outra URL"}`; },
     sites: async () => ((await api.get("/meus-sites")).sites || []).map((s) => `${s.nome}\t${s.url}`).join("\n") || "(nenhum site)",
-    status: async () => { await api.ping(); const s = api.status; return s ? `online · ${s.sites} sites · github ${s.github.configurado ? "ligado" : "desligado"}` : "servidor fora do ar"; },
+    status: async () => { await api.ping(); const s = api.status; return s ? `render ${s.render_online ? "online" : "offline"} · túnel ${s.tunel.tunel} · ${s.sites} site(s) · ${s.tunel.pedidos_atendidos} pedidos` : "OneMapas OS fora do ar"; },
   };
   inp.addEventListener("keydown", async (e) => {
     if (e.key === "ArrowUp" && hi > 0) { inp.value = hist[--hi]; return; }
@@ -426,35 +416,45 @@ function aplicarTema(t) {
   document.body.classList.add("tema-" + t);
   pref.set("tema", t);
 }
-function appConfig(c) {
+async function appConfig(c) {
   const tema = pref.get("tema", "windows");
+  const cfg = await api.get("/config");
   c.innerHTML = `<h2>Aparência</h2>
     <div class="temas">${Object.entries(TEMAS).map(([k, t]) => `<button data-t="${k}" class="${k === tema ? "ativa" : ""}"><div class="prev" style="background:${t.prev}"></div><div class="nome">${t.nome}</div></button>`).join("")}</div>
     <div class="linha" style="margin-top:10px"><label><input type="checkbox" id="cf-escuro" ${pref.get("escuro", false) ? "checked" : ""}> Janelas no modo escuro</label></div>
-    <h2 style="margin-top:22px">Chave do dono</h2>
-    <p class="mudo">É ela que prova que os sites são seus. Guarde uma cópia: se limpar o navegador sem a cópia, você perde o acesso para editar.
-      Para usar em outro PC, cole a chave lá.</p>
-    <div class="linha"><input type="password" id="cf-chave" value="${esc(chaveDono())}" readonly style="flex:1">
+    <h2 style="margin-top:22px">Este PC</h2>
+    <div class="campo"><label>Nome do dono</label><input type="text" id="cf-dono" value="${esc(cfg.dono)}"></div>
+    <div class="campo"><label>Servidor Render</label><input type="text" id="cf-serv" value="${esc(cfg.servidor)}"></div>
+    <p class="mudo">Pasta dos sites: ${esc(cfg.pasta)}</p>
+    <h3>Chave do PC (prova que os sites são seus)</h3>
+    <p class="mudo">Guarde uma cópia. Se trocar de PC, cole a chave no novo PC e copie a pasta dos sites.</p>
+    <div class="linha"><input type="password" id="cf-chave" value="${esc(cfg.chave)}" style="flex:1">
       <button class="btn" id="cf-mostrar">Mostrar</button><button class="btn" id="cf-copiar">Copiar</button></div>
-    <div class="linha" style="margin-top:8px"><input type="text" id="cf-importar" placeholder="Colar chave de outro PC" style="flex:1"><button class="btn prim" id="cf-usar">Usar esta chave</button></div>`;
+    <div class="linha" style="margin-top:12px"><button class="btn prim" id="cf-salvar">Salvar</button></div>`;
   c.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { aplicarTema(b.dataset.t); c.querySelectorAll("[data-t]").forEach((x) => x.classList.toggle("ativa", x === b)); });
   $("#cf-escuro", c).onchange = (e) => { document.body.classList.toggle("escuro", e.target.checked); pref.set("escuro", e.target.checked); };
   $("#cf-mostrar", c).onclick = () => { const i = $("#cf-chave", c); i.type = i.type === "password" ? "text" : "password"; };
-  $("#cf-copiar", c).onclick = async () => { try { await navigator.clipboard.writeText(chaveDono()); notificar("Chave copiada", "Guarde em lugar seguro."); } catch { $("#cf-chave", c).type = "text"; $("#cf-chave", c).select(); } };
-  $("#cf-usar", c).onclick = () => {
-    const k = $("#cf-importar", c).value.trim();
-    if (!/^[A-Za-z0-9_-]{32,128}$/.test(k)) return notificar("Chave inválida");
-    if (!confirm("Trocar a chave deste navegador? Os sites da chave atual somem daqui (guarde-a antes).")) return;
-    pref.set("chave", k); notificar("Chave trocada"); appConfig(c); carregarIcones();
+  $("#cf-copiar", c).onclick = async () => { try { await navigator.clipboard.writeText($("#cf-chave", c).value); notificar("Chave copiada", "Guarde em lugar seguro."); } catch { $("#cf-chave", c).type = "text"; $("#cf-chave", c).select(); } };
+  $("#cf-salvar", c).onclick = async () => {
+    const novo = { dono: $("#cf-dono", c).value, servidor: $("#cf-serv", c).value };
+    const k = $("#cf-chave", c).value.trim();
+    if (k !== cfg.chave) {
+      if (!/^[A-Za-z0-9_-]{32,128}$/.test(k)) return notificar("Chave inválida");
+      if (!confirm("Trocar a chave deste PC? Os sites registrados com a chave antiga deixam de ser deste PC.")) return;
+      novo.chave = k;
+    }
+    const r = await api.post("/config", novo);
+    notificar(r.ok ? "Configurações salvas" : "Não salvo", r.ok ? "" : "Confira o endereço do servidor.");
+    api.ping();
   };
 }
 
 function appSobre(c) {
   const s = api.status;
   c.innerHTML = `<h2>OneMapas OS</h2><p>Versão ${esc(s?.versao || "?")}</p>
-    <p>Sistema da One Mapas Office para criar sites. Tudo roda num servidor web: cada site fica em <b>${esc(DOMINIO().replace(/^https?:\/\//, ""))}/&lt;nome&gt;</b>
-      e aparece como uma pasta na sua Área de Trabalho.</p>
-    <p class="mudo">Servidor: Render · Cópia: GitHub · ISO: Debian 12 que abre direto nesta interface.</p>
+    <p>Sistema da One Mapas Office para criar sites. O site roda <b>neste PC</b> (pasta na Área de Trabalho) e fica no ar em
+      <b>&lt;nome&gt;.${esc(DOMINIO_SITES())}</b>. O Render faz a ponte entre os visitantes e este PC.</p>
+    <p class="mudo">Visitante → Render → PC → Render → visitante · ISO: Debian 12.</p>
     <p class="mudo">Interface: OneMapas Shell (estilos Windows, Mint e Mac).</p>`;
 }
 
@@ -497,7 +497,7 @@ $("#menu-busca").onkeydown = (e) => { if (e.key === "Enter") $("#menu-apps butto
 document.addEventListener("click", (e) => {
   const a = e.target.closest("[data-acao]")?.dataset.acao;
   if (a === "menu") { $("#menu").hidden ? abrirMenu() : fecharMenu(); return; }
-  if (a === "desligar") { fecharMenu(); notificar("Sair", "Seus sites continuam no ar. Pode fechar esta aba."); return; }
+  if (a === "desligar") { fecharMenu(); notificar("Desligar", "Se este PC desligar, os sites saem do ar até ele voltar."); return; }
   if (!e.target.closest("#menu")) fecharMenu();
 });
 
@@ -513,13 +513,12 @@ function relogio() {
 (async function iniciar() {
   aplicarTema(pref.get("tema", "windows"));
   document.body.classList.toggle("escuro", pref.get("escuro", false));
-  chaveDono();
   montarDock();
   relogio(); setInterval(relogio, 15000);
   $("#bandeja-rede").onclick = $("#menubar-rede").onclick = () => abrirApp("rede");
   const on = await api.ping();
-  setInterval(() => api.ping(), 60000);
+  setInterval(() => api.ping(), 15000);
   await carregarIcones();
   if (!pref.get("jaAbriu", false)) { abrirApp("novidades"); pref.set("jaAbriu", true); }
-  notificar("Bem-vindo ao OneMapas OS", on ? "Conectado ao servidor." : "Servidor fora do ar. Tentando de novo…");
+  notificar("Bem-vindo ao OneMapas OS", on ? (api.status.render_online ? "Ligando este PC ao Render…" : "Render sem resposta. Tentando de novo…") : "O programa do PC não está rodando.");
 })();

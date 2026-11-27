@@ -11,9 +11,10 @@ NOME="onemapas-os-${VERSAO}-${CANAL}-amd64.iso"
 rm -rf "$TRAB"; mkdir -p "$TRAB" "$SAIDA"
 cp -a "$RAIZ/os/live-build/." "$TRAB/"
 INC="$TRAB/config/includes.chroot"
-# a ISO abre o servidor web; aqui vão só os drivers de rede e a versão
-mkdir -p "$INC/usr/share/onemapas" "$INC/usr/local/sbin" \
+# copia o programa do PC (servidor dos sites + túnel) e os drivers de rede
+mkdir -p "$INC/usr/share/onemapas/os" "$INC/usr/local/sbin" \
          "$INC/etc/systemd/system" "$INC/etc/modprobe.d" "$INC/etc/NetworkManager/conf.d"
+cp -a "$RAIZ/os/pc" "$RAIZ/os/webui" "$INC/usr/share/onemapas/os/"
 cp "$RAIZ/os/network/onemapas-net" "$INC/usr/local/sbin/"
 cp "$RAIZ/os/network/onemapas-net.service" "$INC/etc/systemd/system/"
 cp "$RAIZ/os/network/onemapas-net.conf" "$INC/etc/modprobe.d/"

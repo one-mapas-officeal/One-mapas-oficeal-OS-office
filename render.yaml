@@ -1,29 +1,30 @@
-# Render: o OneMapas OS roda como servidor web em onemapasoficeal.com.br
-#   /          -> interface do OneMapas OS
-#   /<nome>/   -> sites criados (pasta sites/<nome>/)
+# Render: GATEWAY do OneMapas OS (a ponte entre os visitantes e os PCs)
+#   https://onemapasos.oficeal.com                 -> portal + API
+#   https://<nome>.onemapasos.oficeal.com/?...     -> site que roda no PC do dono
+# Visitante -> Render -> PC do dono -> Render -> visitante
 services:
   - type: web
     runtime: python
-    name: onemapas-os
-    plan: free
+    name: onemapas-gateway
+    plan: starter   # o plano free "dorme" e derruba os túneis; use starter ou maior
     branch: main
     buildCommand: python3 --version
-    startCommand: python3 os/backend/onemapas_server.py
+    startCommand: python3 os/render/gateway.py
     healthCheckPath: /api/status
     autoDeploy: true
-    # criar/editar site grava no GitHub; isso não deve disparar um novo deploy
     buildFilter:
       ignoredPaths:
-        - sites/**
+        - registro/**
         - ISO/**
     domains:
-      - onemapasoficeal.com.br
+      - onemapasos.oficeal.com
+      - "*.onemapasos.oficeal.com"
     envVars:
-      - key: ONEMAPAS_DOMINIO
-        value: https://onemapasoficeal.com.br
+      - key: ONEMAPAS_DOMINIO_SITES
+        value: onemapasos.oficeal.com
       - key: GITHUB_REPO
         value: one-mapas-officeal/One-mapas-oficeal-OS-office
       - key: GITHUB_BRANCH
         value: main
       - key: GITHUB_TOKEN
-        sync: false   # cole o token no painel do Render (permissão Contents: read and write)
+        sync: false   # token só deste repositório, Contents: read and write (guarda o registro dos nomes)

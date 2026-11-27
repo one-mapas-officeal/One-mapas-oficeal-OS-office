@@ -194,7 +194,7 @@ td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bord
 /* ---------- notificações ---------- */
 #notificacoes { position: fixed; right: 12px; bottom: 60px; display: flex; flex-direction: column; gap: 8px; z-index: 9800; }
 body.tema-mac #notificacoes { top: 36px; bottom: auto; }
-.notif { width: 300px; max-width: calc(100vw - 24px); background: var(--janela-bg); color: var(--janela-txt); border: 1px solid var(--borda); border-left: 4px solid var(--acento); border-radius: 6px; padding: 10px 12px; box-shadow: var(--sombra); animation: entra .25s ease-out; }
+.notif { overflow-wrap: anywhere; width: 300px; max-width: calc(100vw - 24px); background: var(--janela-bg); color: var(--janela-txt); border: 1px solid var(--borda); border-left: 4px solid var(--acento); border-radius: 6px; padding: 10px 12px; box-shadow: var(--sombra); animation: entra .25s ease-out; }
 @keyframes entra { from { transform: translateX(30px); opacity: 0; } }
 
 /* ---------- celular ---------- */

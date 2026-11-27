@@ -14,7 +14,8 @@ xdg-user-dirs
 xdg-utils
 pcmanfm
 mousepad
-# --- utilitários ---
+# --- programa do PC (Python) ---
+python3
 
 git
 curl
