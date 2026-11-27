@@ -1,0 +1,9 @@
+#!/bin/sh
+# Sobe o backend e mantém a interface aberta (se fechar, abre de novo)
+python3 /usr/share/onemapas/os/backend/onemapas_server.py >"$HOME/.onemapas.log" 2>&1 &
+for i in $(seq 1 30); do curl -s http://127.0.0.1:8080/api/ping >/dev/null && break; sleep 0.5; done
+while true; do
+  chromium --kiosk --no-first-run --noerrdialogs --disable-infobars --password-store=basic \
+    --user-data-dir="$HOME/.config/onemapas-ui" --app=http://127.0.0.1:8080
+  sleep 1
+done

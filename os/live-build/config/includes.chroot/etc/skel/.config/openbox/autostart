@@ -1,0 +1,5 @@
+# OneMapas OS: inicia o backend local e abre a interface em tela cheia
+xset s off; xset -dpms; xset s noblank
+unclutter -idle 5 &
+xdg-user-dirs-update
+/usr/local/bin/onemapas-sessao &
