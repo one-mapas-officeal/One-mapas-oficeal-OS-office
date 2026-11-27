@@ -62,8 +62,9 @@ def tela():
         print(f"  {VERM}Sem rede.{FIM} Ligue o cabo ou use a opcao 1 (Wi-Fi).\n")
     if s:
         pc, pub = s["pc"], s["pc"]["publico"]
+        print(f"  Link:     {NEG}{s['servidor']}/_site/<nome>/{FIM}")
         if pub.get("porta_aberta"):
-            print(f"  Sites:    {VERDE}{NEG}{pub['endereco']}/<nome>/{FIM}  {VERDE}(abre de fora){FIM}")
+            print(f"  Sites:    {VERDE}abrem de fora{FIM} {CINZA}(direto: {pub['endereco']}/<nome>/){FIM}")
         elif pub.get("cgnat"):
             print(f"  Sites:    {VERM}provedor com CGNAT: peca um IP publico ao provedor{FIM}")
         else:

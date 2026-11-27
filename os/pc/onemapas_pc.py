@@ -268,6 +268,11 @@ def link_site(nome):
     return f"{end}/{nome}/" if end else ""
 
 
+def url_escolhida(nome):
+    """Endereço com o nome que a pessoa escolheu (o Render manda o visitante para este PC)."""
+    return f"{config()['servidor']}/_site/{nome}/?sistema=onemapasoficealOS&site=true&load=em-espera"
+
+
 def eh_cgnat(ip):
     """IP do roteador em faixa de CGNAT (100.64.0.0/10) ou privada: o provedor não dá IP público."""
     try:
@@ -441,7 +446,9 @@ def meus_sites():
     for p in sorted(pasta_sites().iterdir()):
         if p.is_dir() and NOME_VALIDO.match(p.name):
             m = ler_meta(p.name)
-            res.append({"nome": p.name, "url": link_site(p.name), "titulo": m.get("titulo", p.name),
+            # url = o endereço do NOME ESCOLHIDO (é o que a pessoa compartilha); link_direto = IP:porta do PC
+            res.append({"nome": p.name, "url": m.get("url") or url_escolhida(p.name), "link_direto": link_site(p.name),
+                        "titulo": m.get("titulo", p.name),
                         "criado_em": m.get("criado_em"), "atualizado_em": m.get("atualizado_em"),
                         "pasta": str(p)})
     return res
@@ -477,11 +484,12 @@ def criar(dados):
     pasta.mkdir(parents=True, exist_ok=True)
     (pasta / "index.html").write_text(html, "utf-8")
     (pasta / "style.css").write_text(css, "utf-8")
-    meta = {"nome": nome, "titulo": titulo, "dono": cfg["dono"], "criado_em": agora(), "atualizado_em": agora()}
+    meta = {"nome": nome, "titulo": titulo, "url": r.get("url") or v.get("url") or url_escolhida(nome), "dono": cfg["dono"],
+            "criado_em": agora(), "atualizado_em": agora()}
     (pasta / META).write_text(json.dumps(meta, indent=2, ensure_ascii=False), "utf-8")
     acordar_copia.set()
     bater()  # grava já o endereço deste PC no novo site
-    return 201, {**v, "url": link_site(nome), "porta_aberta": estado["publico"].get("porta_aberta"),
+    return 201, {**v, "url": meta["url"], "link_direto": link_site(nome), "porta_aberta": estado["publico"].get("porta_aberta"),
                  "pasta": str(pasta), "mensagem": "Site criado!"}
 
 

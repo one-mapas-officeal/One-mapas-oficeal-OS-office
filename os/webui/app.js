@@ -39,7 +39,8 @@ const api = {
     return !!this.status;
   },
 };
-const BASE_SITES = () => api.status?.pc?.publico?.endereco || `http://IP-deste-PC:${api.status?.porta_sites || 8090}`;
+// endereço com o NOME ESCOLHIDO (o que a pessoa compartilha); o Render manda o visitante para este PC
+const BASE_SITES = () => `${api.status?.servidor || "https://onemapas-gateway.onrender.com"}/_site`;
 
 /* ---------------- notificações ---------------- */
 function notificar(titulo, texto = "") {
@@ -148,7 +149,7 @@ const FIXADOS = ["criador", "arquivos", "novidades", "iso", "rede", "terminal", 
 function appCriador(c) {
   c.innerHTML = `
     <h2>Criar um novo site</h2>
-    <p class="mudo">Digite o nome do site. O Render confere no Supabase se ele está livre. O site roda neste PC e o visitante abre direto aqui.</p>
+    <p class="mudo">Digite o nome do site. O Render confere no Supabase se ele está livre. O site roda neste PC, e quem abrir o link vai direto para cá.</p>
     <div class="campo"><label>URL do site</label>
       <div class="url-linha"><span>${esc(BASE_SITES())}/</span><input type="text" id="cs-nome" placeholder="oi" maxlength="63"><span style="padding-right:10px">/</span></div></div>
     <div class="linha"><button class="btn prim" id="cs-verificar">Está disponível?</button></div>
@@ -188,11 +189,12 @@ function appCriador(c) {
     $("#cs-criar", c).disabled = false;
     if (r.status === 201) {
       form.hidden = true;
-      resp.innerHTML = `<div class="resposta sim"><b class="sim">Site criado!</b><br>📁 ${esc(r.pasta)}<br>🌐 ${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a>` : "o link aparece assim que o Render confirmar o IP deste PC"}
-        <div class="mudo">${r.porta_aberta ? "✅ Já abre de fora: mande esse link para quem quiser." : "⚠️ Ainda não abre de fora deste PC. Veja o app Conexão para liberar a porta."}</div></div>
+      resp.innerHTML = `<div class="resposta sim"><b class="sim">Site criado!</b><br>📁 ${esc(r.pasta)}
+        <div style="margin-top:8px"><b>Link do site (compartilhe este):</b><br><a href="${esc(r.url)}" target="_blank" rel="noopener" style="word-break:break-all">${esc(r.url)}</a></div>
+        <div class="mudo" style="margin-top:6px">${r.porta_aberta ? "✅ Já abre de fora deste PC." : "⚠️ Ainda não abre de fora deste PC: veja o app Conexão para liberar a porta."}${r.link_direto ? ` Endereço direto do PC: ${esc(r.link_direto)}` : ""}</div></div>
         <div class="linha"><button class="btn prim" id="cs-editar">Editar arquivos</button><button class="btn" id="cs-ver">Ver site</button></div>`;
       $("#cs-editar", c).onclick = () => abrirApp("editor", { site: r.nome });
-      $("#cs-ver", c).onclick = () => r.url && window.open(r.url, "_blank", "noopener");
+      $("#cs-ver", c).onclick = () => window.open(r.url, "_blank", "noopener");
       notificar("Site criado", r.url || r.nome);
       carregarIcones();
     } else if (r.status === 409) {
@@ -218,7 +220,7 @@ async function appArquivos(c, _o, jid) {
       it.ondblclick = () => abrirApp("editor", { site: it.dataset.nome });
       it.onclick = () => {
         const s = sites.find((x) => x.nome === it.dataset.nome);
-        $("#ar-det", c).innerHTML = `<div class="cartao"><b>${esc(s.titulo)}</b><br><a href="${esc(s.url)}" target="_blank" rel="noopener" style="word-break:break-all">${esc(s.url)}</a>
+        $("#ar-det", c).innerHTML = `<div class="cartao"><b>${esc(s.titulo)}</b><br><span class="mudo">Link do site:</span> <a href="${esc(s.url)}" target="_blank" rel="noopener" style="word-break:break-all">${esc(s.url)}</a>
           <p class="mudo">Criado ${esc((s.criado_em || "").replace("T", " ").slice(0, 16))} · alterado ${esc((s.atualizado_em || "").replace("T", " ").slice(0, 16))}</p>
           <div class="linha"><button class="btn prim" data-a="ed">Editar arquivos</button><button class="btn" data-a="fm">Abrir no gerenciador</button><button class="btn" data-a="ver">Ver online</button><button class="btn" data-a="del">Apagar site</button></div></div>`;
         $("[data-a=ed]", c).onclick = () => abrirApp("editor", { site: s.nome });

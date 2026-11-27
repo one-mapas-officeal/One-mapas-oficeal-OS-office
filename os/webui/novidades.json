@@ -1,11 +1,12 @@
 {
   "novidades": [
     {
-      "versao": "0.3.0",
+      "versao": "0.3.1",
       "canal": "beta",
       "data": "27/11/2026",
       "titulo": "O visitante abre o site direto no PC",
       "itens": [
+        "O link do site é o do NOME ESCOLHIDO (ex.: .../_site/padaria/?sistema=onemapasoficealOS&site=true&load=em-espera): é ele que a pessoa compartilha, e ele leva o visitante ao PC",
         "Link do site: http://IP-do-PC:8090/<nome>/, entregue pelo próprio PC",
         "O Render não entrega mais os sites: só guarda os dados no Supabase",
         "Sinal a cada 5 minutos: mantém o Render acordado e atualiza o IP do PC no Supabase",
