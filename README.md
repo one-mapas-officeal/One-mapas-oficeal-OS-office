@@ -98,6 +98,15 @@ A interface Windows / Mint / Mac abre **no celular** (na mesma rede) com esse c�
 Ela é achada sozinha no boot; a primeira vez, escolha o disco com a opção **2** do painel.
 Sem disco, os dados ficam na memória e somem ao desligar.
 
+**Testar a ISO sem pendrive (tela do PC no navegador):** `tools/rodar_iso.py` baixa a ISO mais recente, liga numa
+máquina virtual (QEMU) e mostra a tela do PC numa página Flask no seu IP, com teclado e botões:
+
+```bash
+pip install flask            # e o QEMU: sudo apt install qemu-system-x86  |  Termux: pkg install qemu-system-x86-64-headless
+python3 tools/rodar_iso.py   # abre http://SEU-IP:5000/?t=CODIGO (o código aparece no terminal)
+```
+As portas 8080 (interface do OneMapas) e 8090 (sites) da máquina virtual ficam no seu IP também.
+
 **Gerar**:
 - GitHub: mude `ISO/pedido-build.json` (canal/versão). O Actions monta e publica nos Releases.
   A aba **Progresso da ISO** mostra o andamento e o botão de download.
