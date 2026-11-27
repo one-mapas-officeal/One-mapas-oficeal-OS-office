@@ -1,0 +1,53 @@
+{
+  "canal": "beta",
+  "versao": "0.1.0",
+  "pasta": "ISO/beta/0.1.0",
+  "nome": "onemapas-os-0.1.0-beta-amd64.iso",
+  "arquitetura": "amd64",
+  "base": "Debian 12 (bookworm)",
+  "status": "construindo: iniciando",
+  "progresso": 70,
+  "etapas": [
+    {
+      "nome": "Interface Windows / Mint / Mac",
+      "feito": true
+    },
+    {
+      "nome": "Gateway no Render (Cliente → Render → PC → Render → Cliente)",
+      "feito": true
+    },
+    {
+      "nome": "Túnel do PC + pasta do site na Área de Trabalho",
+      "feito": true
+    },
+    {
+      "nome": "Supabase: registro dos nomes + cópia dos sites",
+      "feito": true
+    },
+    {
+      "nome": "Drivers e firmware de rede",
+      "feito": true
+    },
+    {
+      "nome": "Configuração do live-build",
+      "feito": true
+    },
+    {
+      "nome": "Gateway no ar (onemapas-gateway.onrender.com + Supabase)",
+      "feito": true
+    },
+    {
+      "nome": "Build da ISO no GitHub Actions",
+      "feito": false
+    },
+    {
+      "nome": "Testes em PC real",
+      "feito": false
+    }
+  ],
+  "tamanho_mb": null,
+  "sha256": null,
+  "download": null,
+  "data": "2026-11-27",
+  "build": "https://github.com/one-mapas-officeal/One-mapas-oficeal-OS-office/actions/runs/45936140522"
+}
