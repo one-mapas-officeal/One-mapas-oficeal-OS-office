@@ -42,8 +42,8 @@
   "download": null,
   "pasta": "ISO/beta/0.2.0",
   "nome": "onemapas-os-0.2.0-beta-amd64.iso",
-  "status": "construindo: iniciando",
-  "progresso": 70,
+  "status": "preparando",
+  "progresso": 72,
   "data": "2026-11-27",
   "build": "https://github.com/one-mapas-officeal/One-mapas-oficeal-OS-office/actions/runs/45940388147"
 }
