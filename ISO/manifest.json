@@ -1,7 +1,7 @@
 {
   "projeto": "OneMapas OS",
   "descricao": "Índice das ISOs do OneMapas OS. Cada ISO fica em ISO/<canal>/<versão>/.",
-  "atualizado_em": "2026-11-27T00:00:00Z",
+  "atualizado_em": "2026-11-27T03:48:33Z",
   "canais": [
     "alpha",
     "beta",
@@ -21,7 +21,7 @@
       "nome": "onemapas-os-0.1.0-beta-amd64.iso",
       "arquitetura": "amd64",
       "base": "Debian 12 (bookworm)",
-      "status": "na fila do GitHub Actions",
+      "status": "falhou (veja o log do build)",
       "progresso": 70,
       "etapas": [
         {
@@ -64,7 +64,8 @@
       "tamanho_mb": null,
       "sha256": null,
       "download": null,
-      "data": "2026-11-27"
+      "data": "2026-11-27",
+      "build": "https://github.com/one-mapas-officeal/One-mapas-oficeal-OS-office/actions/runs/45936140522"
     }
   ]
 }
