@@ -1,7 +1,7 @@
 {
   "projeto": "OneMapas OS",
   "descricao": "Índice das ISOs do OneMapas OS. Cada ISO fica em ISO/<canal>/<versão>/.",
-  "atualizado_em": "2026-11-27T04:31:48Z",
+  "atualizado_em": "2026-11-27T12:25:53Z",
   "canais": [
     "alpha",
     "beta",
@@ -14,6 +14,55 @@
     "pasta": "ISO/beta/0.2.0"
   },
   "isos": [
+    {
+      "canal": "beta",
+      "versao": "0.3.0",
+      "arquitetura": "amd64",
+      "base": "Linux puro (kernel Linux + BusyBox), sem distribuição",
+      "etapas": [
+        {
+          "nome": "Interface Windows / Mint / Mac (abre no celular, com código de acesso)",
+          "feito": true
+        },
+        {
+          "nome": "Gateway no Render + Supabase (registro e cópia dos sites)",
+          "feito": true
+        },
+        {
+          "nome": "Linux puro: kernel + BusyBox + Python, rodando na memória",
+          "feito": true
+        },
+        {
+          "nome": "Drivers carregados sozinhos + firmware de Wi-Fi e rede",
+          "feito": true
+        },
+        {
+          "nome": "Dados no disco do PC (pasta onemapas-dados)",
+          "feito": true
+        },
+        {
+          "nome": "Boot testado em máquina virtual (BIOS e UEFI)",
+          "feito": true
+        },
+        {
+          "nome": "Build da ISO no GitHub Actions",
+          "feito": false
+        },
+        {
+          "nome": "Testes em PC real",
+          "feito": false
+        }
+      ],
+      "tamanho_mb": null,
+      "sha256": null,
+      "download": null,
+      "pasta": "ISO/beta/0.3.0",
+      "nome": "onemapas-os-0.3.0-beta-amd64.iso",
+      "status": "construindo: iniciando",
+      "progresso": 70,
+      "data": "2026-11-27",
+      "build": "https://github.com/one-mapas-officeal/One-mapas-oficeal-OS-office/actions/runs/45998564300"
+    },
     {
       "canal": "beta",
       "versao": "0.2.0",
