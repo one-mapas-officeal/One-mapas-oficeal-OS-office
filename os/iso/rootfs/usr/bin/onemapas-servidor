@@ -1,0 +1,9 @@
+#!/bin/sh
+# Programa do PC: interface (acessada pelo celular), pasta dos sites e túnel até o Render
+export PATH=/usr/sbin:/usr/bin
+while [ ! -f /run/onemapas/dados.env ]; do sleep 1; done
+. /run/onemapas/dados.env
+export HOME="$DADOS" ONEMAPAS_CONFIG ONEMAPAS_SITES ONEMAPAS_LAN=1 ONEMAPAS_PIN_ARQ=/run/onemapas/pin
+export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt PYTHONDONTWRITEBYTECODE=1
+mkdir -p "$ONEMAPAS_SITES" "$ONEMAPAS_CONFIG"
+exec python3 /usr/share/onemapas/os/pc/onemapas_pc.py >>/run/onemapas/servidor.log 2>&1

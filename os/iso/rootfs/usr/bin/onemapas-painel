@@ -1,0 +1,180 @@
+#!/usr/bin/python3
+"""Painel em modo texto na tela do PC. A interface completa (Windows / Mint / Mac) abre no celular."""
+import json, os, select, subprocess, sys, time, urllib.request
+
+VERSAO = open("/usr/share/onemapas/versao").read().strip() if os.path.exists("/usr/share/onemapas/versao") else "?"
+LIMPA = "\033[2J\033[H"
+NEG, VERDE, AMAR, VERM, CINZA, FIM = "\033[1m", "\033[32m", "\033[33m", "\033[31m", "\033[90m", "\033[0m"
+
+
+def sh(*cmd, timeout=30):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+    except Exception:
+        return ""
+
+
+def ips():
+    res = []
+    for linha in sh("ip", "-4", "-o", "addr").splitlines():
+        p = linha.split()
+        if len(p) > 3 and p[1] != "lo":
+            res.append((p[1], p[3].split("/")[0]))
+    return res
+
+
+def status():
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8080/api/status", timeout=8) as r:
+            return json.load(r)
+    except Exception:
+        return None
+
+
+def env():
+    d = {}
+    try:
+        for l in open("/run/onemapas/dados.env"):
+            if "=" in l:
+                k, v = l.strip().split("=", 1)
+                d[k] = v.strip('"')
+    except Exception:
+        pass
+    return d
+
+
+def pin():
+    try:
+        return open("/run/onemapas/pin").read().strip()
+    except Exception:
+        return "..."
+
+
+def tela():
+    s, e, rede = status(), env(), ips()
+    print(LIMPA + f"{NEG}  OneMapas OS {VERSAO}{FIM}  {CINZA}(Linux puro){FIM}\n")
+    if rede:
+        print(f"  {NEG}Abra no celular (mesma rede):{FIM}")
+        for nome, ip in rede:
+            print(f"     {VERDE}{NEG}http://{ip}:8080{FIM}   {CINZA}({nome}){FIM}")
+        print(f"  {NEG}Codigo de acesso:{FIM} {NEG}{pin()}{FIM}\n")
+    else:
+        print(f"  {VERM}Sem rede.{FIM} Ligue o cabo ou use a opcao 1 (Wi-Fi).\n")
+    if s:
+        t = s["tunel"]
+        tun = {"conectado": f"{VERDE}conectado{FIM}", "reconectando": f"{AMAR}reconectando...{FIM}"}.get(t["tunel"], t["tunel"])
+        print(f"  Render:   {tun}  {CINZA}{s['servidor']}{FIM}")
+        print(f"  Sites:    {s['sites']}   pedidos atendidos: {t['pedidos_atendidos']}")
+        c = t.get("copia", {})
+        print(f"  Copia:    {c.get('estado', '?')} ({c.get('arquivos', 0)} arquivos no Supabase)")
+    else:
+        print(f"  Servidor: {AMAR}iniciando...{FIM}")
+    if e.get("DISCO") == "memoria":
+        print(f"  Dados:    {AMAR}na MEMORIA (somem ao desligar) -> use a opcao 2{FIM}")
+    else:
+        print(f"  Dados:    {VERDE}{e.get('DISCO', '?')}{FIM} {CINZA}{e.get('DADOS', '')}{FIM}")
+    print(f"\n  {NEG}1{FIM} Wi-Fi   {NEG}2{FIM} Onde salvar   {NEG}3{FIM} Log   {NEG}4{FIM} Terminal   {NEG}8{FIM} Reiniciar   {NEG}9{FIM} Desligar")
+    print(f"  {CINZA}A tela atualiza sozinha a cada 10 s.{FIM}\n  > ", end="", flush=True)
+
+
+def perguntar(txt):
+    print(txt, end="", flush=True)
+    return sys.stdin.readline().strip()
+
+
+def wifi():
+    ifs = [n for n in os.listdir("/sys/class/net") if os.path.isdir(f"/sys/class/net/{n}/wireless")]
+    if not ifs:
+        perguntar(f"\n  {VERM}Nenhuma placa Wi-Fi encontrada.{FIM} (Enter) ")
+        return
+    i = ifs[0]
+    sh("ip", "link", "set", i, "up")
+    print(f"\n  Procurando redes em {i}...")
+    redes, atual = {}, None
+    for l in sh("iw", "dev", i, "scan").splitlines():
+        l = l.strip()
+        if l.startswith("BSS "):
+            atual = {}
+        elif l.startswith("signal:") and atual is not None:
+            atual["sinal"] = float(l.split()[1])
+        elif l.startswith("SSID:") and atual is not None:
+            nome = l[5:].strip()
+            if nome and (nome not in redes or redes[nome] < atual.get("sinal", -100)):
+                redes[nome] = atual.get("sinal", -100)
+    lista = sorted(redes, key=lambda n: -redes[n])[:15]
+    if not lista:
+        perguntar(f"  {AMAR}Nenhuma rede encontrada.{FIM} (Enter) ")
+        return
+    for k, n in enumerate(lista, 1):
+        print(f"   {k:2}. {n}  {CINZA}{redes[n]:.0f} dBm{FIM}")
+    esc = perguntar("  Numero da rede (Enter = cancelar): ")
+    if not esc.isdigit() or not 1 <= int(esc) <= len(lista):
+        return
+    ssid = lista[int(esc) - 1]
+    senha = perguntar(f"  Senha de '{ssid}' (vazio = rede aberta): ")
+    conf_dir = env().get("ONEMAPAS_CONFIG", "/run/onemapas")
+    os.makedirs(conf_dir, exist_ok=True)
+    conf = os.path.join(conf_dir, "wifi.conf")
+    if senha:
+        txt = sh("wpa_passphrase", ssid, senha)
+        if "network=" not in txt:
+            perguntar(f"  {VERM}Senha invalida (8 a 63 caracteres).{FIM} (Enter) ")
+            return
+        txt = "\n".join(l for l in txt.splitlines() if not l.strip().startswith("#psk="))
+    else:
+        txt = 'network={\n\tssid="%s"\n\tkey_mgmt=NONE\n}' % ssid.replace('"', '')
+    with open(conf, "w") as f:
+        f.write("ctrl_interface=/run/wpa_supplicant\n" + txt + "\n")
+    os.chmod(conf, 0o600)
+    print("  Conectando...")
+    sh("killall", "-q", "wpa_supplicant")
+    sh("killall", "-q", "udhcpc")
+    sh("wpa_supplicant", "-B", "-i", i, "-c", conf)
+    sh("udhcpc", "-n", "-q", "-t", "10", "-i", i, "-s", "/usr/share/udhcpc/default.script", timeout=60)
+    ok = any(n == i for n, _ in ips())
+    subprocess.Popen(["/usr/bin/onemapas-rede"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    perguntar(f"  {VERDE + 'Conectado!' if ok else VERM + 'Nao conectou. Confira a senha.'}{FIM} (Enter) ")
+
+
+def disco():
+    linhas = [l.split("|") for l in sh("/usr/bin/onemapas-disco", "listar").splitlines() if l.count("|") == 3]
+    print(f"\n  Onde salvar os sites e a chave do PC (fica numa pasta 'onemapas-dados'; nada e apagado):")
+    if not linhas:
+        perguntar(f"  {AMAR}Nenhum disco encontrado.{FIM} (Enter) ")
+        return
+    for k, (dev, tipo, nome, tam) in enumerate(linhas, 1):
+        print(f"   {k}. {dev}  {tipo}  {nome}  {tam}")
+    esc = perguntar("  Numero (Enter = cancelar): ")
+    if esc.isdigit() and 1 <= int(esc) <= len(linhas):
+        print("  " + sh("/usr/bin/onemapas-disco", "usar", linhas[int(esc) - 1][0]).strip())
+        perguntar("  (Enter) ")
+
+
+def main():
+    while True:
+        tela()
+        pronto, _, _ = select.select([sys.stdin], [], [], 10)
+        if not pronto:
+            continue
+        op = sys.stdin.readline().strip()
+        if op == "1":
+            wifi()
+        elif op == "2":
+            disco()
+        elif op == "3":
+            print(LIMPA + sh("tail", "-n", "40", "/run/onemapas/servidor.log"))
+            perguntar("  (Enter) ")
+        elif op == "4":
+            print("\n  Terminal: aperte Alt+F2. Para voltar aqui: Alt+F1.")
+            perguntar("  (Enter) ")
+        elif op == "8":
+            sh("sync"); sh("reboot")
+        elif op == "9":
+            sh("sync"); sh("poweroff")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass

@@ -1,0 +1,32 @@
+#!/bin/sh
+# Rede: DHCP em todas as placas de cabo e Wi-Fi com a rede salva
+export PATH=/usr/sbin:/usr/bin
+. /run/onemapas/dados.env 2>/dev/null
+WIFI="$ONEMAPAS_CONFIG/wifi.conf"
+for i in /sys/class/net/*; do
+  n=${i##*/}
+  [ "$n" = lo ] && continue
+  ip link set "$n" up 2>/dev/null
+  if [ -d "$i/wireless" ] || [ -d "$i/phy80211" ]; then
+    if [ -f "$WIFI" ]; then
+      killall -q wpa_supplicant; mkdir -p /run/wpa_supplicant
+      wpa_supplicant -B -i "$n" -c "$WIFI" -P /run/wpa_supplicant.pid
+      udhcpc -b -q -t 10 -i "$n" -s /usr/share/udhcpc/default.script -p /run/udhcpc.$n.pid
+    fi
+  else
+    udhcpc -b -t 5 -i "$n" -s /usr/share/udhcpc/default.script -p /run/udhcpc.$n.pid
+  fi
+done
+# acerta o relógio pelo cabeçalho Date de um site (o HTTPS precisa da hora certa)
+sleep 4
+python3 - <<'PY' 2>/dev/null
+import urllib.request, email.utils, subprocess
+for url in ("http://www.google.com", "http://cloudflare.com"):
+    try:
+        d = urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=6).headers["Date"]
+        t = email.utils.parsedate_to_datetime(d)
+        subprocess.run(["date", "-u", "-s", t.strftime("%Y-%m-%d %H:%M:%S")], capture_output=True)
+        break
+    except Exception:
+        pass
+PY

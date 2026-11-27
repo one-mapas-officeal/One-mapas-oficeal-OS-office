@@ -1,0 +1,28 @@
+#!/bin/sh
+# OneMapas OS: inicialização (drivers, disco, rede)
+export PATH=/usr/sbin:/usr/bin
+# o shell do BusyBox usaria o modprobe dele (que não abre drivers .ko.zst); usa o kmod de verdade
+modprobe() { /usr/bin/modprobe "$@"; }
+mkdir -p /run/onemapas /var/log
+exec >>/run/onemapas/boot.log 2>&1
+echo "== boot $(date)"
+hostname onemapas-pc
+ip link set lo up
+echo 0 > /proc/sys/kernel/printk 2>/dev/null   # silencia mensagens do kernel na tela
+[ -f /usr/share/onemapas/font.psf ] && setfont /usr/share/onemapas/font.psf -C /dev/tty1 2>/dev/null
+
+# Drivers: carrega o módulo de cada peça de hardware encontrada (placas de rede, USB, discos...)
+echo /usr/sbin/mdev > /proc/sys/kernel/hotplug
+carregar() { find /sys/devices -name modalias -exec cat {} + 2>/dev/null | sort -u | xargs -r /usr/bin/modprobe -abq 2>/dev/null; }
+carregar; sleep 2; carregar
+mdev -s
+for m in vfat ext4 ntfs3 exfat nls_cp437 nls_iso8859_1 nls_utf8 cfg80211 mac80211; do modprobe -q $m; done
+
+/usr/bin/onemapas-disco auto     # onde salvar os sites (disco do PC ou memória)
+/usr/bin/onemapas-rede &         # cabo (DHCP) + Wi-Fi salvo
+echo "== rcS ok"
+# diagnóstico: com "onemapas.debug" na linha do kernel, mostra o log de boot na tela
+if grep -q onemapas.debug /proc/cmdline; then
+  ( sleep 25; { cat /run/onemapas/boot.log; echo "== redes:"; ls /sys/class/net; ip -4 addr; ip route;
+    echo "== modulos de rede:"; /usr/bin/lsmod | grep -iE "e1000|virtio|r8169|iwl|cfg80211" ; cat /etc/resolv.conf; } > /dev/console 2>&1 ) &
+fi

@@ -21,6 +21,7 @@ Só usa a biblioteca padrão do Python.
 """
 import base64
 import hashlib
+import hmac
 import json
 import mimetypes
 import os
@@ -56,6 +57,11 @@ CAMINHO_VALIDO = re.compile(r"^(?:[A-Za-z0-9_][A-Za-z0-9_.-]{0,80}/){0,5}[A-Za-z
 META = "onemapas-site.json"
 MAX_ARQUIVO_EDITOR = 1024 * 1024
 TRABALHADORES_TUNEL = 4
+# Modo rede (ISO de Linux puro): a interface é aberta de outro aparelho (celular) pelo IP do PC,
+# só com o código de acesso que aparece na tela do PC.
+LAN = os.environ.get("ONEMAPAS_LAN") == "1"
+IP_LITERAL = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+tentativas_pin = {}
 
 estado = {"tunel": "desligado", "ultimo_erro": None, "pedidos_atendidos": 0, "ultimo_pedido": None,
           "copia": {"estado": "aguardando", "ultima": None, "arquivos": 0, "erro": None}}
@@ -80,10 +86,39 @@ def config():
                 cfg.update(json.loads(CONFIG_FILE.read_text("utf-8")))
             except Exception:
                 pass
+        mudou = False
         if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", cfg.get("chave") or ""):
             cfg["chave"] = secrets.token_urlsafe(32)
+            mudou = True
+        if not re.fullmatch(r"\d{6}", str(cfg.get("pin") or "")):
+            cfg["pin"] = f"{secrets.randbelow(10**6):06d}"
+            mudou = True
+        if mudou:
             _gravar(cfg)
         return cfg
+
+
+def token_sessao():
+    cfg = config()
+    return hmac.new(cfg["chave"].encode(), ("sessao:" + cfg["pin"]).encode(), hashlib.sha256).hexdigest()[:40]
+
+
+PAGINA_ENTRAR = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>OneMapas OS</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;font-family:system-ui,sans-serif;
+background:linear-gradient(135deg,#0b3d91,#42a5f5);color:#fff;text-align:center}.c{max-width:360px;width:100%}
+input{font-size:28px;letter-spacing:8px;text-align:center;width:100%;padding:12px;border-radius:10px;border:0;margin:12px 0}
+button{font-size:18px;padding:12px 24px;border-radius:10px;border:0;background:#fff;color:#0b3d91;font-weight:700;width:100%}
+p{opacity:.85}</style></head><body><div class="c"><h1>OneMapas OS</h1>
+<p>Digite o código que aparece na tela do PC.</p>
+<input id="p" inputmode="numeric" maxlength="6" autocomplete="one-time-code" autofocus>
+<button id="b">Entrar</button><p id="m"></p></div>
+<script>
+async function entrar(){const r=await fetch("/entrar",{method:"POST",headers:{"Content-Type":"application/json","X-OneMapas":"1"},
+ body:JSON.stringify({pin:document.getElementById("p").value})});
+ if(r.ok)location.replace("/");else document.getElementById("m").textContent=(await r.json()).mensagem||"Código errado";}
+document.getElementById("b").onclick=entrar;document.getElementById("p").onkeydown=e=>{if(e.key==="Enter")entrar()};
+</script></body></html>"""
 
 
 def _gravar(cfg):
@@ -410,16 +445,61 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
-    def seguro(self):
-        """Só aceita a própria interface: bloqueia outros sites (CSRF) e DNS rebinding."""
+    def host_ok(self):
+        """Bloqueia DNS rebinding: só 127.0.0.1/localhost, ou um IP numérico no modo rede."""
         host = (self.headers.get("Host") or "").split(":")[0]
-        if host not in ("127.0.0.1", "localhost"):
+        return host in ("127.0.0.1", "localhost") or (LAN and bool(IP_LITERAL.match(host)))
+
+    def logado(self):
+        host = (self.headers.get("Host") or "").split(":")[0]
+        if host in ("127.0.0.1", "localhost") and self.client_address[0] == "127.0.0.1":
+            return True
+        for parte in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = parte.strip().partition("=")
+            if k == "onemapas_sessao" and hmac.compare_digest(v, token_sessao()):
+                return True
+        return False
+
+    def seguro(self):
+        """Só aceita a própria interface: bloqueia outros sites (CSRF), DNS rebinding e quem não tem o código."""
+        if not self.host_ok() or not self.logado():
             return False
         if self.command != "GET" and self.headers.get("X-OneMapas") != "1":
             return False
         return True
 
+    def pagina_entrar(self):
+        corpo = PAGINA_ENTRAR.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(corpo)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(corpo)
+
+    def entrar(self):
+        ip = self.client_address[0]
+        t = time.time()
+        lst = [x for x in tentativas_pin.get(ip, []) if t - x < 60]
+        if len(lst) >= 5:
+            return self.enviar(429, {"mensagem": "Muitas tentativas. Espere 1 minuto."})
+        tentativas_pin[ip] = lst + [t]
+        dados = self.corpo_json() or {}
+        if not hmac.compare_digest(str(dados.get("pin", "")), config()["pin"]):
+            return self.enviar(403, {"mensagem": "Código errado."})
+        corpo = b'{"ok": true}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Set-Cookie", f"onemapas_sessao={token_sessao()}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict")
+        self.send_header("Content-Length", str(len(corpo)))
+        self.end_headers()
+        self.wfile.write(corpo)
+
     def do_GET(self):
+        if LAN and self.host_ok() and not self.logado():
+            if self.path.split("?")[0] in ("/", "/entrar"):
+                return self.pagina_entrar()
+            return self.enviar(401, {"mensagem": "Digite o código de acesso."})
         if not self.seguro():
             return self.enviar(403, {"mensagem": "proibido"})
         u = urllib.parse.urlparse(self.path)
@@ -474,6 +554,8 @@ class Handler(BaseHTTPRequestHandler):
         return self.enviar(404, {"mensagem": "rota desconhecida"})
 
     def do_POST(self):
+        if LAN and self.path == "/entrar" and self.host_ok() and self.headers.get("X-OneMapas") == "1":
+            return self.entrar()
         if not self.seguro():
             return self.enviar(403, {"mensagem": "proibido"})
         dados = self.corpo_json()
@@ -543,9 +625,11 @@ def main():
     threading.Thread(target=trabalhador_copia, daemon=True).start()
     acordar_copia.set()
     porta = int(os.environ.get("ONEMAPAS_PORTA", "8080"))
-    print(f"OneMapas OS {VERSAO} (PC) em http://127.0.0.1:{porta}\n  sites em: {pasta_sites()}\n"
-          f"  Render: {cfg['servidor']}", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", porta), Handler).serve_forever()
+    if LAN and os.environ.get("ONEMAPAS_PIN_ARQ"):
+        Path(os.environ["ONEMAPAS_PIN_ARQ"]).write_text(cfg["pin"])
+    print(f"OneMapas OS {VERSAO} (PC) em http://{'0.0.0.0' if LAN else '127.0.0.1'}:{porta}\n"
+          f"  sites em: {pasta_sites()}\n  Render: {cfg['servidor']}", flush=True)
+    ThreadingHTTPServer(("0.0.0.0" if LAN else "127.0.0.1", porta), Handler).serve_forever()
 
 
 if __name__ == "__main__":

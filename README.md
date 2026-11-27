@@ -57,8 +57,8 @@ os/
   render/gateway.py   roda no Render: portal, registro (Supabase), túnel, proxy e cópia dos sites
   pc/onemapas_pc.py   roda no PC: interface, pasta dos sites, túnel até o Render e envio da cópia
   webui/              interface gráfica + novidades.json
-  network/            drivers de rede da ISO (onemapas-net, serviço, modprobe, NetworkManager)
-  live-build/         configuração da ISO (Debian 12)
+  network/            ajustes dos drivers de rede (modprobe)
+  iso/                rootfs da ISO (init, rede, disco, painel) + GRUB
   build-iso.sh        gera a ISO
 ISO/manifest.json     índice das ISOs;  ISO/<canal>/<versão>/
 render.yaml           configuração do Render
@@ -79,17 +79,29 @@ render.yaml           configuração do Render
 
 Para testar sem DNS: `https://<serviço>.onrender.com/_site/<nome>/`.
 
-## ISO
+## ISO (Linux puro)
 
-A ISO é um Debian 12 que liga direto no OneMapas OS online, em tela cheia, em pt-BR e teclado ABNT2.
-Sem internet, abre a tela de Wi-Fi primeiro.
+A ISO **não instala nenhuma distribuição**. Ela tem só:
+- o **kernel Linux** e os drivers (rede com cabo e Wi-Fi, USB, SATA, NVMe, cartão; sistemas de arquivos ext4, NTFS, FAT, exFAT);
+- o **firmware** de Wi-Fi e rede (Intel, Realtek, Atheros/Qualcomm, Broadcom, MediaTek, Marvell);
+- o **BusyBox** (comandos básicos, `init`, DHCP), o `kmod` (carrega os drivers), o `wpa_supplicant` (Wi-Fi) e o **Python**;
+- o **OneMapas OS** (programa do PC + interface).
 
-- **GitHub**: Actions > *Construir ISO* > Run workflow > canal (`alpha`, `beta`, `em-testes`, `estavel`) e versão.
-  A `.iso` vai para os Releases (o GitHub não aceita arquivos acima de 100 MB no repositório). `ISO/manifest.json` e
-  `ISO/<canal>/<versão>/` são atualizados sozinhos.
-- **Local**: `sudo apt install live-build && sudo ./os/build-iso.sh beta 0.1.0` gera a ISO em `out/`.
+Tudo roda na memória RAM. A ISO tem cerca de 180 MB e é montada em segundos. Inicia em PCs com BIOS e com UEFI
+(desligue o *Secure Boot*).
 
-### Drivers de rede
-Os drivers ficam no kernel Linux. A ISO traz o **firmware** (Intel, Realtek, Atheros/Qualcomm, Broadcom, MediaTek…),
-o **`onemapas-net`** (detecta as placas PCI/USB na inicialização, carrega o driver, libera o Wi-Fi e avisa se falta firmware)
-e ajustes de estabilidade em `/etc/modprobe.d/onemapas-net.conf`.
+**Na tela do PC** aparece um painel em modo texto: o endereço `http://<IP-do-PC>:8080`, o **código de acesso**,
+a rede, o estado do túnel, e as opções Wi-Fi, onde salvar, log, terminal (Alt+F2), reiniciar e desligar.
+A interface Windows / Mint / Mac abre **no celular** (na mesma rede) com esse código.
+
+**Onde ficam os dados**: numa pasta `onemapas-dados` em qualquer partição do PC (ext4, NTFS, FAT, exFAT).
+Ela é achada sozinha no boot; a primeira vez, escolha o disco com a opção **2** do painel.
+Sem disco, os dados ficam na memória e somem ao desligar.
+
+**Gerar**:
+- GitHub: mude `ISO/pedido-build.json` (canal/versão). O Actions monta e publica nos Releases.
+  A aba **Progresso da ISO** mostra o andamento e o botão de download.
+- Local (Ubuntu/Debian, como root): `sudo ./os/build-iso.sh beta 0.2.0` gera a ISO em `out/`.
+- Diagnóstico: no GRUB, adicione `onemapas.debug` à linha do kernel para ver o log do boot na tela.
+
+Arquivos: `os/build-iso.sh` (monta tudo), `os/iso/rootfs/` (init, rcS, rede, disco, painel), `os/iso/boot/grub/grub.cfg`.

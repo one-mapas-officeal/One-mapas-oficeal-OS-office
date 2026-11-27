@@ -7,6 +7,7 @@ uso: atualizar_manifest.py <canal> <versao> <status> <progresso> [arquivo.iso] [
 """
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,14 +26,23 @@ agora = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 entrada = next((i for i in m["isos"] if i["canal"] == canal and i["versao"] == versao), None)
 if entrada is None:
-    modelo = m["isos"][0] if m["isos"] else {}
-    entrada = {"canal": canal, "versao": versao, "arquitetura": "amd64", "base": "Debian 12 (bookworm)",
-               "etapas": [dict(e, feito=e["feito"] and "Build" not in e["nome"] and "Testes" not in e["nome"])
-                          for e in modelo.get("etapas", [])],
+    entrada = {"canal": canal, "versao": versao, "arquitetura": "amd64",
+               "base": "Linux puro (kernel Linux + BusyBox), sem distribuição",
+               "etapas": [{"nome": n, "feito": f} for n, f in [
+                   ("Interface Windows / Mint / Mac (abre no celular, com código de acesso)", True),
+                   ("Gateway no Render + Supabase (registro e cópia dos sites)", True),
+                   ("Linux puro: kernel + BusyBox + Python, rodando na memória", True),
+                   ("Drivers carregados sozinhos + firmware de Wi-Fi e rede", True),
+                   ("Dados no disco do PC (pasta onemapas-dados)", True),
+                   ("Boot testado em máquina virtual (BIOS e UEFI)", True),
+                   ("Build da ISO no GitHub Actions", False),
+                   ("Testes em PC real", False)]],
                "tamanho_mb": None, "sha256": None, "download": None}
     m["isos"].insert(0, entrada)
 
 entrada.update({"pasta": pasta, "nome": nome, "status": status, "progresso": progresso, "data": agora[:10]})
+if os.environ.get("ONEMAPAS_BASE"):
+    entrada["base"] = os.environ["ONEMAPAS_BASE"]
 if url_build:
     entrada["build"] = url_build
 if iso and iso.exists():

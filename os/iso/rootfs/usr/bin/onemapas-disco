@@ -1,0 +1,66 @@
+#!/bin/sh
+# Onde o OneMapas OS guarda os sites e a chave do PC.
+#   onemapas-disco auto            procura uma pasta onemapas-dados em algum disco; senão usa a memória
+#   onemapas-disco listar          lista os discos (dispositivo|tipo|nome|tamanho)
+#   onemapas-disco usar /dev/sdXN  passa a salvar nesse disco (copia o que estava na memória)
+export PATH=/usr/sbin:/usr/bin
+mkdir -p /run/onemapas /mnt
+
+gravar_env() {  # $1 = pasta de dados, $2 = descrição
+  mkdir -p "$1/.config/onemapas" "$1/Área de Trabalho/Meus Sites OneMapas"
+  cat > /run/onemapas/dados.env <<E
+DADOS="$1"
+ONEMAPAS_CONFIG="$1/.config/onemapas"
+ONEMAPAS_SITES="$1/Área de Trabalho/Meus Sites OneMapas"
+DISCO="$2"
+E
+}
+
+tipo() { blkid -o value -s TYPE "$1" 2>/dev/null; }
+
+montar() {  # $1 = /dev/xxx -> imprime o ponto de montagem
+  d=$1; n=${d##*/}; mp=/mnt/$n
+  if grep -q "^$d " /proc/mounts; then grep "^$d " /proc/mounts | cut -d' ' -f2 | head -1; return 0; fi
+  case "$(tipo "$d")" in
+    ntfs) t=ntfs3 ;;
+    vfat|exfat|ext2|ext3|ext4|btrfs|xfs|f2fs) t=$(tipo "$d") ;;
+    *) return 1 ;;
+  esac
+  mkdir -p "$mp" && mount -t "$t" -o rw "$d" "$mp" 2>/dev/null && echo "$mp"
+}
+
+listar() {
+  for b in /sys/class/block/*; do
+    n=${b##*/}
+    case "$n" in loop*|ram*|sr*|zram*|dm-*) continue ;; esac
+    # disco inteiro com partições: lista só as partições
+    [ ! -f "$b/partition" ] && ls "$b" | grep -q "^$n" && continue
+    t=$(tipo "/dev/$n"); [ -z "$t" ] && continue
+    case "$t" in iso9660|swap|crypto_LUKS|LVM2_member) continue ;; esac
+    tam=$(( $(cat "$b/size") / 2097152 ))
+    nome=$(blkid -o value -s LABEL "/dev/$n" 2>/dev/null)
+    echo "/dev/$n|$t|${nome:-sem nome}|${tam} GB"
+  done
+}
+
+case "$1" in
+  auto)
+    for linha in $(listar | cut -d'|' -f1); do
+      mp=$(montar "$linha") || continue
+      if [ -d "$mp/onemapas-dados" ]; then gravar_env "$mp/onemapas-dados" "$linha"; echo "dados em $linha"; exit 0; fi
+      umount "$mp" 2>/dev/null
+    done
+    gravar_env /run/onemapas/temp "memoria"
+    ;;
+  listar) listar ;;
+  usar)
+    mp=$(montar "$2") || { echo "Não consegui montar $2 (se for Windows, desligue a Inicialização Rápida)."; exit 1; }
+    novo="$mp/onemapas-dados"; mkdir -p "$novo" || exit 1
+    . /run/onemapas/dados.env
+    [ "$DISCO" = memoria ] && cp -a "$DADOS/." "$novo/" 2>/dev/null
+    gravar_env "$novo" "$2"
+    killall -q python3   # o servidor reinicia sozinho usando o novo lugar
+    echo "ok"
+    ;;
+  *) echo "uso: onemapas-disco auto|listar|usar /dev/xxx"; exit 1 ;;
+esac

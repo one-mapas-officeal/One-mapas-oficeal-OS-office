@@ -26,24 +26,15 @@ concurrency:
 
 jobs:
   iso:
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    container:
-      image: debian:bookworm
-      options: --privileged
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ONEMAPAS_BASE: "Linux puro (kernel Linux + BusyBox), sem distribuição"
     steps:
-      - name: Ferramentas (git, live-build, gh)
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git ca-certificates curl python3 \
-            live-build debootstrap squashfs-tools xorriso mtools dosfstools \
-            grub-pc-bin grub-efi-amd64-bin syslinux syslinux-common isolinux gh
-
       - uses: actions/checkout@v4
 
       - name: Canal e versão
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global user.name "OneMapas Bot"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -64,7 +55,7 @@ jobs:
       - name: Construir ISO
         env:
           ONEMAPAS_PROGRESSO: ${{ github.workspace }}/tools/progresso_ci.sh
-        run: ./os/build-iso.sh "$CANAL" "$VERSAO"
+        run: sudo -E ./os/build-iso.sh "$CANAL" "$VERSAO" && sudo chown -R "$USER" out
 
       - name: Publicar nos Releases
         env:

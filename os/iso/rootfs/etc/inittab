@@ -1,0 +1,8 @@
+# BusyBox init: OneMapas OS
+::sysinit:/etc/init.d/rcS
+::respawn:/usr/bin/onemapas-servidor
+::respawn:/usr/bin/onemapas-painel
+tty2::respawn:/usr/sbin/getty -n -l /bin/sh 38400 tty2
+::ctrlaltdel:/usr/sbin/reboot
+::shutdown:/bin/sync
+::shutdown:/bin/umount -a -r

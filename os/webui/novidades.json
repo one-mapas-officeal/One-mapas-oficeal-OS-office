@@ -1,6 +1,21 @@
 {
   "novidades": [
     {
+      "versao": "0.2.0 (ISO)",
+      "canal": "beta",
+      "data": "27/11/2026",
+      "titulo": "ISO de Linux puro: rápida e pequena",
+      "itens": [
+        "Sem Debian: só o kernel Linux, o BusyBox, o Python e o OneMapas OS, tudo rodando na memória",
+        "A ISO caiu de 1,55 GB para cerca de 180 MB e é montada em segundos",
+        "Liga em segundos, em PCs com BIOS antiga e com UEFI",
+        "Na tela do PC: painel com o endereço, o código de acesso, a rede, o Wi-Fi e onde salvar",
+        "A interface Windows / Mint / Mac abre no celular pelo IP do PC, com código de acesso",
+        "Os sites e a chave do PC ficam numa pasta onemapas-dados no disco do PC (não somem ao desligar)",
+        "Drivers de rede carregados sozinhos e firmware de Wi-Fi Intel, Realtek, Atheros/Qualcomm, Broadcom e MediaTek"
+      ]
+    },
+    {
       "versao": "0.4.1",
       "canal": "beta",
       "data": "27/11/2026",

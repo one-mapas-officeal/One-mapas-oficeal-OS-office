@@ -461,7 +461,7 @@ function appSobre(c) {
   c.innerHTML = `<h2>OneMapas OS</h2><p>Versão ${esc(s?.versao || "?")}</p>
     <p>Sistema da One Mapas Office para criar sites. O site roda <b>neste PC</b> (pasta na Área de Trabalho) e fica no ar em
       <b>&lt;nome&gt;.${esc(DOMINIO_SITES())}</b>. O Render faz a ponte entre os visitantes e este PC.</p>
-    <p class="mudo">Visitante → Render → PC → Render → visitante · ISO: Debian 12.</p>
+    <p class="mudo">Visitante → Render → PC → Render → visitante · ISO: Linux puro (kernel + BusyBox).</p>
     <p class="mudo">Interface: OneMapas Shell (estilos Windows, Mint e Mac).</p>`;
 }
 

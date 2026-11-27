@@ -1,5 +1,0 @@
-# OneMapas OS: sobe o servidor dos sites (túnel para o Render) e abre a interface
-xset s off; xset -dpms; xset s noblank
-unclutter -idle 5 &
-xdg-user-dirs-update
-/usr/local/bin/onemapas-sessao &
