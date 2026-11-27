@@ -16,6 +16,7 @@ services:
       ignoredPaths:
         - sites/**
         - ISO/**
+        - vista-tickets/**
     domains:
       - onemapasoficeal.com.br
     envVars:

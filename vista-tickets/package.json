@@ -1,0 +1,16 @@
+{
+  "name": "vista-tickets",
+  "version": "1.0.0",
+  "description": "Vista Tickets - bot de tickets para Discord",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "dependencies": {
+    "discord.js": "^14.28.1"
+  }
+}
