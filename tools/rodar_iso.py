@@ -14,7 +14,7 @@ Depois abra no navegador (do PC ou do celular, na mesma rede):
 
 Precisa do QEMU:
     Ubuntu/Debian:  sudo apt install qemu-system-x86
-    Termux:         pkg install qemu-system-x86-64-headless
+    Termux:         pkg install qemu-system-x86-64-headless e2fsprogs
     Windows:        instale o QEMU (qemu.org) e deixe qemu-system-x86_64 no PATH
 """
 import argparse
@@ -41,6 +41,8 @@ except ImportError:
 REPO = "one-mapas-officeal/One-mapas-oficeal-OS-office"
 MANIFEST = f"https://raw.githubusercontent.com/{REPO}/claude/os-website-builder-y5wp60/ISO/manifest.json"
 ISO_PADRAO = f"https://github.com/{REPO}/releases/download/iso-beta-0.3.1/onemapas-os-0.3.1-beta-amd64.iso"
+RELEASES = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
+NO_TERMUX = "com.termux" in os.environ.get("PREFIX", "")
 PASTA = Path(os.environ.get("ONEMAPAS_VM", Path.home() / ".onemapas-vm"))
 
 
@@ -61,19 +63,42 @@ def porta_livre(p):
         return s.connect_ex(("127.0.0.1", p)) != 0
 
 
-def baixar_iso(destino: Path):
-    url = ISO_PADRAO
-    try:  # a ISO mais nova que estiver pronta no manifest
-        with urllib.request.urlopen(MANIFEST, timeout=10) as r:
-            m = json.load(r)
-        prontas = [i for i in m.get("isos", []) if i.get("download") and i.get("status") == "pronta"]
-        if prontas:
-            url = prontas[0]["download"]
+def numero(versao):
+    try:
+        return tuple(int(x) for x in versao.split("."))
+    except ValueError:
+        return (0,)
+
+
+def iso_mais_nova():
+    """A ISO de versão mais alta publicada nos Releases do GitHub (ou no manifest, ou a padrão)."""
+    candidatas = []
+    try:
+        req = urllib.request.Request(RELEASES, headers={"Accept": "application/vnd.github+json", "User-Agent": "OneMapas"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            for rel in json.load(r):
+                for a in rel.get("assets", []):
+                    if a["name"].endswith(".iso") and a["name"].startswith("onemapas-os-"):
+                        versao = a["name"][len("onemapas-os-"):].split("-")[0]
+                        candidatas.append((numero(versao), a["browser_download_url"]))
     except Exception:
         pass
+    if not candidatas:
+        try:
+            with urllib.request.urlopen(MANIFEST, timeout=10) as r:
+                for i in json.load(r).get("isos", []):
+                    if i.get("download") and i.get("status") == "pronta":
+                        candidatas.append((numero(i["versao"]), i["download"]))
+        except Exception:
+            pass
+    return max(candidatas)[1] if candidatas else ISO_PADRAO
+
+
+def baixar_iso(destino: Path):
+    url = iso_mais_nova()
     arq = destino / url.rsplit("/", 1)[-1]
     if arq.exists() and arq.stat().st_size > 50_000_000:
-        print(f"ISO já baixada: {arq}")
+        print(f"ISO já baixada: {arq.name}")
         return arq
     print(f"Baixando {url}")
     tmp = arq.with_suffix(".parcial")
@@ -89,22 +114,34 @@ def baixar_iso(destino: Path):
                 print(f"\r  {feito * 100 // total:3d}%  {feito >> 20} de {total >> 20} MB", end="", flush=True)
     print()
     tmp.rename(arq)
+    for velha in destino.glob("onemapas-os-*.iso"):  # apaga as versões antigas (economiza espaço no celular)
+        if velha != arq:
+            velha.unlink()
+            print(f"Apaguei a ISO antiga: {velha.name}")
     return arq
+
+
+def disco_vazio(arq: Path):
+    with open(arq, "rb") as f:
+        return not any(f.read(2 * 1024 * 1024))
 
 
 def criar_disco(arq: Path, tamanho_mb=1024):
     """Disco virtual para os dados (sites e chave do PC). Já vem com a pasta onemapas-dados."""
-    if arq.exists():
+    if not arq.exists():
+        with open(arq, "wb") as f:
+            f.truncate(tamanho_mb * 1024 * 1024)
+    if not disco_vazio(arq):
         return arq
-    with open(arq, "wb") as f:
-        f.truncate(tamanho_mb * 1024 * 1024)
     mkfs, debugfs = shutil.which("mkfs.ext4") or shutil.which("mke2fs"), shutil.which("debugfs")
     if mkfs:
         subprocess.run([mkfs, "-q", "-F", "-t", "ext4", "-L", "ONEMAPAS", str(arq)], check=False)
         if debugfs:
             subprocess.run([debugfs, "-w", "-R", "mkdir onemapas-dados", str(arq)], capture_output=True)
+        print("Disco de dados pronto (os sites e a chave do PC ficam salvos).")
     else:
-        print("Aviso: sem mkfs.ext4 o disco fica vazio; no painel use a opção 2 (ou os dados ficam na memória).")
+        dica = "pkg install e2fsprogs" if NO_TERMUX else "sudo apt install e2fsprogs"
+        print(f"Aviso: falta o mkfs.ext4 ({dica}). Sem ele, os dados ficam na memória e somem ao desligar.")
     return arq
 
 
@@ -121,7 +158,9 @@ class Maquina:
     def ligar(self):
         qemu = shutil.which("qemu-system-x86_64")
         if not qemu:
-            sys.exit("Não achei o qemu-system-x86_64. Veja como instalar no começo deste arquivo.")
+            sys.exit("Não achei o qemu-system-x86_64. Instale com:\n  " +
+                     ("pkg install qemu-system-x86-64-headless" if NO_TERMUX else
+                      "sudo apt install qemu-system-x86   (Windows: instale do qemu.org e coloque no PATH)"))
         acel = ["-accel", "kvm", "-cpu", "host"] if os.access("/dev/kvm", os.R_OK | os.W_OK) else ["-accel", "tcg"]
         cmd = [qemu, *acel, "-m", str(self.memoria), "-smp", "2", "-display", "none", "-vga", "std",
                "-monitor", f"tcp:127.0.0.1:{self.porta_monitor},server,nowait",
@@ -130,7 +169,7 @@ class Maquina:
                "-device", "e1000,netdev=n0"]
         if self.disco:
             cmd += ["-drive", f"file={self.disco},format=raw,if=virtio"]
-        print("Ligando:", " ".join(cmd[:4]), "...", "(sem KVM: fica mais lento)" if "tcg" in acel else "(com KVM)")
+        print("Ligando a máquina virtual", "(sem KVM: o boot leva alguns minutos)" if "tcg" in acel else "(com KVM)")
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         for _ in range(50):
             time.sleep(0.2)

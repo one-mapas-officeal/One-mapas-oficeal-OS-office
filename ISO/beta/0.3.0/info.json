@@ -30,20 +30,20 @@
     },
     {
       "nome": "Build da ISO no GitHub Actions",
-      "feito": false
+      "feito": true
     },
     {
       "nome": "Testes em PC real",
       "feito": false
     }
   ],
-  "tamanho_mb": null,
-  "sha256": null,
-  "download": null,
+  "tamanho_mb": 179.1,
+  "sha256": "8055bf2128e2cbcde96914471dd30f8ab2c77d2afb1739a85fb9db5c42ca96d3",
+  "download": "https://github.com/one-mapas-officeal/One-mapas-oficeal-OS-office/releases/download/iso-beta-0.3.0/onemapas-os-0.3.0-beta-amd64.iso",
   "pasta": "ISO/beta/0.3.0",
   "nome": "onemapas-os-0.3.0-beta-amd64.iso",
-  "status": "publicando",
-  "progresso": 97,
+  "status": "pronta",
+  "progresso": 100,
   "data": "2026-11-27",
   "build": "https://github.com/one-mapas-officeal/One-mapas-oficeal-OS-office/actions/runs/45998564300"
 }
