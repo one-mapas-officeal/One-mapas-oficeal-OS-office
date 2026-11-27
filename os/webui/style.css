@@ -200,7 +200,33 @@ body.tema-mac #notificacoes { top: 36px; bottom: auto; }
 /* ---------- celular ---------- */
 @media (max-width: 640px) {
   .janela { left: 0 !important; top: 0 !important; width: 100% !important; height: 100% !important; border-radius: 0; resize: none; }
-  #tarefas button .t { display: none; }
-  body.tema-mac #barra { max-width: calc(100vw - 16px); overflow-x: auto; }
+  .titulo { height: 44px; }
+  .botoes button { width: 48px; }
   .temas { grid-template-columns: 1fr; }
+  /* barra de baixo: no celular as janelas ocupam a tela toda, então os ícones fixos já trocam de app */
+  #barra, body.tema-windows #barra { justify-content: flex-start; gap: 2px; padding: 0 4px; }
+  #tarefas { display: none; }
+  #fixados { flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  #fixados::-webkit-scrollbar { display: none; }
+  #fixados button.aberto { background: rgba(255,255,255,.14); }
+  body.tema-windows #bandeja { position: static; }
+  body.tema-windows #barra .espaco { display: none; }
+  #bandeja { gap: 6px; padding: 0 2px; flex: none; }
+  #bandeja-rede { display: none; }
+  #bandeja-relogio small, #bandeja-relogio br { display: none; }
+  body.tema-mint #btn-iniciar .txt { display: none; }
+  body.tema-mac #barra { max-width: calc(100vw - 16px); overflow-x: auto; }
+  body.tema-mac #menubar { gap: 12px; white-space: nowrap; }
+  body.tema-mac #menubar-app { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  body.tema-mac #fixados button { font-size: 26px; min-width: 42px; }
+  /* ícones da área de trabalho em grade */
+  #icones { right: 12px; flex-direction: row; align-content: flex-start; bottom: auto; gap: 4px; }
+  body.tema-mac #icones { left: 12px; }
+  .icone { width: calc(25% - 3px); }
+  .icone .emoji { font-size: 38px; }
+  #menu { bottom: 56px; max-height: 75vh; }
+  .notif { width: calc(100vw - 24px); }
+  .url-linha { flex-wrap: wrap; }
+  .url-linha span { font-size: 12px; white-space: normal; word-break: break-all; padding: 6px 10px 0; width: 100%; }
+  .url-linha input { padding-left: 10px; }
 }

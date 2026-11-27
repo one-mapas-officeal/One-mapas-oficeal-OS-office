@@ -1,6 +1,20 @@
 {
   "novidades": [
     {
+      "versao": "0.2.1",
+      "canal": "beta",
+      "data": "27/11/2026",
+      "titulo": "Interface melhor no celular",
+      "itens": [
+        "Ícones da área de trabalho em grade (4 por linha)",
+        "Barra de baixo sem sobreposição: relógio, apps e status cabem na tela",
+        "Um toque abre o app (no PC continua com dois cliques)",
+        "Campo da URL do site legível em tela pequena",
+        "Estilo Mac: barra de cima em uma linha só",
+        "Botões das janelas maiores, mais fáceis de tocar"
+      ]
+    },
+    {
       "versao": "0.2.0 (ISO)",
       "canal": "beta",
       "data": "27/11/2026",

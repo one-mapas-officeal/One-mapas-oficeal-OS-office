@@ -476,7 +476,9 @@ async function carregarIcones() {
   const sites = (await api.get("/meus-sites")).sites || [];
   $("#icones").innerHTML = [...base, ...sites.map((s) => ({ emoji: "🗂️", rot: s.nome, site: s.nome }))]
     .map((i) => `<div class="icone" ${i.app ? `data-app="${i.app}"` : `data-site="${esc(i.site)}"`}><span class="emoji">${i.emoji}</span><span class="rot">${esc(i.rot)}</span></div>`).join("");
-  $("#icones").querySelectorAll(".icone").forEach((el) => el.ondblclick = () => {
+  // no celular (tela de toque) um toque já abre; no PC, dois cliques
+  const toque = matchMedia("(pointer: coarse)").matches;
+  $("#icones").querySelectorAll(".icone").forEach((el) => el[toque ? "onclick" : "ondblclick"] = () => {
     if (el.dataset.app) abrirApp(el.dataset.app); else abrirApp("editor", { site: el.dataset.site });
   });
   for (const [, j] of janelas) if (j.recarregar) j.recarregar();
@@ -512,7 +514,7 @@ function relogio() {
   const d = new Date();
   const h = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   $("#bandeja-relogio").innerHTML = `${h}<br><small>${d.toLocaleDateString("pt-BR")}</small>`;
-  $("#menubar-relogio").textContent = d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "short" }) + " " + h;
+  $("#menubar-relogio").textContent = innerWidth < 640 ? h : d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "short" }) + " " + h;
   $("#bandeja-rede").textContent = $("#menubar-rede").textContent = navigator.onLine ? "📶" : "🚫";
 }
 
