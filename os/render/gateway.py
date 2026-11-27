@@ -93,7 +93,14 @@ def chave_valida(chave):
     return isinstance(chave, str) and re.fullmatch(r"[A-Za-z0-9_-]{32,128}", chave or "") is not None
 
 
+# Enquanto o DNS curinga (*.onemapasos.oficeal.com) não existe, defina ONEMAPAS_URL_BASE
+# (ex.: https://onemapas-gateway.onrender.com) e os sites ficam em <base>/_site/<nome>/
+URL_BASE = os.environ.get("ONEMAPAS_URL_BASE", "").rstrip("/")
+
+
 def url_site(nome, load="em-espera"):
+    if URL_BASE:
+        return f"{URL_BASE}/_site/{nome}/?{PARAMS_SITE}&load={load}"
     return f"https://{nome}.{DOMINIO_SITES}/?{PARAMS_SITE}&load={load}"
 
 
@@ -451,7 +458,7 @@ tenta();
 def pagina_portal():
     return pagina("OneMapas OS", f"""
 <h1>OneMapas OS</h1>
-<p>Crie um site que roda no seu próprio PC e fica no ar em<br><b>&lt;nome&gt;.{DOMINIO_SITES}</b></p>
+<p>Crie um site que roda no seu próprio PC e fica no ar em<br><b>{(URL_BASE.replace("https://", "") + "/_site/&lt;nome&gt;") if URL_BASE else "&lt;nome&gt;." + DOMINIO_SITES}</b></p>
 <div class="linha"><input id="n" placeholder="nome do site" maxlength="63"><button id="b">Está disponível?</button></div>
 <p id="r"></p>
 <p class="mudo">Para criar o site, instale o OneMapas OS no PC (ISO) ou rode <code>onemapas_pc.py</code>.</p>
@@ -542,7 +549,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/" and self.command in ("GET", "HEAD"):
             return self.html(200, pagina_portal())
         if u.path == "/api/status":
-            return self.json(200, {"ok": True, "versao": VERSAO, "dominio_sites": DOMINIO_SITES, "sites": len(registro),
+            return self.json(200, {"ok": True, "versao": VERSAO, "dominio_sites": DOMINIO_SITES, "url_base": URL_BASE, "sites": len(registro),
                                    "pcs_online": sum(1 for d in set(x["dono_hash"] for x in registro.values()) if tunel.online(d)),
                                    "banco": estado_banco})
         if u.path == "/api/verificar":

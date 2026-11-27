@@ -150,7 +150,9 @@ function appCriador(c) {
     <h2>Criar um novo site</h2>
     <p class="mudo">Digite o endereço que você quer. O Render confere se ele está livre. O site vai rodar neste PC.</p>
     <div class="campo"><label>URL do site</label>
-      <div class="url-linha"><span>https://</span><input type="text" id="cs-nome" placeholder="oi" maxlength="63" style="text-align:right"><span style="padding-right:10px">.${esc(DOMINIO_SITES())}</span></div></div>
+      ${api.status?.url_base
+        ? `<div class="url-linha"><span>${esc(api.status.url_base.replace(/^https?:\/\//, ""))}/_site/</span><input type="text" id="cs-nome" placeholder="oi" maxlength="63"></div></div>`
+        : `<div class="url-linha"><span>https://</span><input type="text" id="cs-nome" placeholder="oi" maxlength="63" style="text-align:right"><span style="padding-right:10px">.${esc(DOMINIO_SITES())}</span></div></div>`}
     <div class="linha"><button class="btn prim" id="cs-verificar">Está disponível?</button></div>
     <div id="cs-resp"></div>
     <div id="cs-form" hidden>
@@ -168,7 +170,7 @@ function appCriador(c) {
 
   $("#cs-verificar", c).onclick = async () => {
     if (!nome.value) { nome.focus(); return; }
-    resp.innerHTML = `<div class="resposta">Perguntando ao Render: a URL <b>https://${esc(nome.value)}.${esc(DOMINIO_SITES())}</b> está disponível?…</div>`;
+    resp.innerHTML = `<div class="resposta">Perguntando ao Render: a URL <b>${api.status?.url_base ? esc(api.status.url_base) + "/_site/" + esc(nome.value) : "https://" + esc(nome.value) + "." + esc(DOMINIO_SITES())}</b> está disponível?…</div>`;
     const v = await api.get("/verificar?nome=" + encodeURIComponent(nome.value));
     if (v.status === 0) { resp.innerHTML = `<div class="resposta nao">${esc(v.mensagem)}</div>`; return; }
     ultimo = v;

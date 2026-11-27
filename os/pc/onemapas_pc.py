@@ -47,7 +47,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 VERSAO = "0.4.0"
 
 PADRAO = {
-    "servidor": os.environ.get("ONEMAPAS_SERVIDOR", "https://onemapasos.oficeal.com"),
+    "servidor": os.environ.get("ONEMAPAS_SERVIDOR", "https://onemapas-gateway.onrender.com"),
     "dono": socket.gethostname(),
     "chave": "",
 }
@@ -441,7 +441,7 @@ class Handler(BaseHTTPRequestHandler):
             cfg = config()
             st, r = render("GET", "/api/status", timeout=6)
             return self.enviar(200, {"ok": True, "versao": VERSAO, "dono": cfg["dono"], "servidor": cfg["servidor"],
-                                     "render_online": st == 200, "dominio_sites": r.get("dominio_sites", ""),
+                                     "render_online": st == 200, "dominio_sites": r.get("dominio_sites", ""), "url_base": r.get("url_base", ""),
                                      "sites": len(meus_sites()), "tunel": estado, "pasta": str(pasta_sites())})
         if u.path == "/api/verificar":
             return self.enviar(200, verificar(q.get("nome", [""])[0]))

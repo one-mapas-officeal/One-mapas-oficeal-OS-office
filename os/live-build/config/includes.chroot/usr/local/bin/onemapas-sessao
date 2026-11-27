@@ -3,7 +3,7 @@
 python3 /usr/share/onemapas/os/pc/onemapas_pc.py >"$HOME/.onemapas.log" 2>&1 &
 for i in $(seq 1 30); do curl -s http://127.0.0.1:8080/api/status >/dev/null && break; sleep 0.5; done
 # sem internet: abre o configurador de Wi-Fi antes
-if ! curl -fsS -o /dev/null --max-time 5 https://onemapasos.oficeal.com/api/status; then
+if ! curl -fsS -o /dev/null --max-time 5 https://onemapas-gateway.onrender.com/api/status; then
   xterm -fa Monospace -fs 13 -geometry 90x28 -title "OneMapas OS - Conectar à internet" \
     -e sh -c 'echo "Sem conexão. Escolha a rede Wi-Fi (ou ligue o cabo)."; sleep 1; nmtui-connect; onemapas-net --relatorio; sleep 2'
 fi
