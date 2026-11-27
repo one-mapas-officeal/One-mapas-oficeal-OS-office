@@ -1,4 +1,4 @@
-/* OneMapas OS: área de trabalho do PC. O PC roda o site; o Render faz a ponte com os visitantes. */
+/* OneMapas OS: área de trabalho do PC. O PC serve os sites direto; o Render só passa dados ao Supabase. */
 "use strict";
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -31,15 +31,15 @@ const api = {
   async ping() {
     const s = await this.get("/status");
     this.status = s.ok ? s : null;
-    const no_ar = !!this.status && this.status.tunel.tunel === "conectado";
+    const pc = this.status?.pc, no_ar = !!pc && pc.publico.porta_aberta === true;
     const b = $("#bandeja-backend");
     b.classList.toggle("on", no_ar);
-    b.title = no_ar ? `PC conectado ao Render · ${this.status.sites} site(s) no ar` : "PC desconectado do Render: os sites estão fora do ar";
+    b.title = no_ar ? `Sites acessíveis de fora · ${pc.publico.endereco}` : "Os sites ainda não abrem de fora (veja Conexão)";
     if (this.status) $("#menu-dono").textContent = "Dono: " + this.status.dono;
     return !!this.status;
   },
 };
-const DOMINIO_SITES = () => (api.status?.dominio_sites || "onemapasos.oficeal.com");
+const BASE_SITES = () => api.status?.pc?.publico?.endereco || `http://IP-deste-PC:${api.status?.porta_sites || 8090}`;
 
 /* ---------------- notificações ---------------- */
 function notificar(titulo, texto = "") {
@@ -137,7 +137,7 @@ const APPS = {
   editor: { nome: "Editor", emoji: "📝", largura: 860, altura: 600, abrir: appEditor },
   novidades: { nome: "Novidades", emoji: "📰", largura: 560, altura: 520, abrir: appNovidades },
   iso: { nome: "Progresso da ISO", emoji: "💿", largura: 620, altura: 560, abrir: appIso },
-  rede: { nome: "Conexão com o Render", emoji: "📶", largura: 540, altura: 440, abrir: appRede },
+  rede: { nome: "Conexão", emoji: "📶", largura: 540, altura: 440, abrir: appRede },
   terminal: { nome: "Terminal", emoji: "⌨️", largura: 640, altura: 400, abrir: appTerminal },
   config: { nome: "Configurações", emoji: "⚙️", largura: 600, altura: 600, abrir: appConfig },
   sobre: { nome: "Sobre o OneMapas OS", emoji: "ℹ️", largura: 460, altura: 380, abrir: appSobre },
@@ -148,11 +148,9 @@ const FIXADOS = ["criador", "arquivos", "novidades", "iso", "rede", "terminal", 
 function appCriador(c) {
   c.innerHTML = `
     <h2>Criar um novo site</h2>
-    <p class="mudo">Digite o endereço que você quer. O Render confere se ele está livre. O site vai rodar neste PC.</p>
+    <p class="mudo">Digite o nome do site. O Render confere no Supabase se ele está livre. O site roda neste PC e o visitante abre direto aqui.</p>
     <div class="campo"><label>URL do site</label>
-      ${api.status?.url_base
-        ? `<div class="url-linha"><span>${esc(api.status.url_base.replace(/^https?:\/\//, ""))}/_site/</span><input type="text" id="cs-nome" placeholder="oi" maxlength="63"></div></div>`
-        : `<div class="url-linha"><span>https://</span><input type="text" id="cs-nome" placeholder="oi" maxlength="63" style="text-align:right"><span style="padding-right:10px">.${esc(DOMINIO_SITES())}</span></div></div>`}
+      <div class="url-linha"><span>${esc(BASE_SITES())}/</span><input type="text" id="cs-nome" placeholder="oi" maxlength="63"><span style="padding-right:10px">/</span></div></div>
     <div class="linha"><button class="btn prim" id="cs-verificar">Está disponível?</button></div>
     <div id="cs-resp"></div>
     <div id="cs-form" hidden>
@@ -170,13 +168,13 @@ function appCriador(c) {
 
   $("#cs-verificar", c).onclick = async () => {
     if (!nome.value) { nome.focus(); return; }
-    resp.innerHTML = `<div class="resposta">Perguntando ao Render: a URL <b>${api.status?.url_base ? esc(api.status.url_base) + "/_site/" + esc(nome.value) : "https://" + esc(nome.value) + "." + esc(DOMINIO_SITES())}</b> está disponível?…</div>`;
+    resp.innerHTML = `<div class="resposta">Perguntando ao Render: a URL <b>${esc(BASE_SITES())}/${esc(nome.value)}/</b> está disponível?…</div>`;
     const v = await api.get("/verificar?nome=" + encodeURIComponent(nome.value));
     if (v.status === 0) { resp.innerHTML = `<div class="resposta nao">${esc(v.mensagem)}</div>`; return; }
     ultimo = v;
     const sim = v.disponivel;
     resp.innerHTML = `<div class="resposta ${sim ? "sim" : "nao"}">
-      Resposta: <b class="${sim ? "sim" : "nao"}">${sim ? "SIM" : "NÃO"}</b>. ${sim ? esc(v.mensagem) : "<b>Escolha outra URL</b>"}
+      Resposta: <b class="${sim ? "sim" : "nao"}">${sim ? "SIM" : "NÃO"}</b>. ${sim ? `A URL ${esc(BASE_SITES())}/${esc(v.nome)}/ está disponível!` : "<b>Escolha outra URL</b>"}
       ${!sim && v.mensagem !== "Escolha outra URL" ? `<div class="mudo">${esc(v.mensagem.replace(/\.? ?Escolha outra URL$/, ""))}</div>` : ""}
       <ul>${(v.checagens || []).map((k) => `<li>${esc(k.onde)}: ${esc(k.resultado)}</li>`).join("")}</ul></div>`;
     form.hidden = !sim;
@@ -190,12 +188,12 @@ function appCriador(c) {
     $("#cs-criar", c).disabled = false;
     if (r.status === 201) {
       form.hidden = true;
-      resp.innerHTML = `<div class="resposta sim"><b class="sim">Site criado!</b><br>📁 ${esc(r.pasta)}<br>🌐 <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a>
-        <div class="mudo">O site roda neste PC. Uma cópia vai para o Supabase: se o PC desligar, os visitantes veem a cópia.</div></div>
+      resp.innerHTML = `<div class="resposta sim"><b class="sim">Site criado!</b><br>📁 ${esc(r.pasta)}<br>🌐 ${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a>` : "o link aparece assim que o Render confirmar o IP deste PC"}
+        <div class="mudo">${r.porta_aberta ? "✅ Já abre de fora: mande esse link para quem quiser." : "⚠️ Ainda não abre de fora deste PC. Veja o app Conexão para liberar a porta."}</div></div>
         <div class="linha"><button class="btn prim" id="cs-editar">Editar arquivos</button><button class="btn" id="cs-ver">Ver site</button></div>`;
       $("#cs-editar", c).onclick = () => abrirApp("editor", { site: r.nome });
-      $("#cs-ver", c).onclick = () => window.open(r.url, "_blank", "noopener");
-      notificar("Site criado", r.url);
+      $("#cs-ver", c).onclick = () => r.url && window.open(r.url, "_blank", "noopener");
+      notificar("Site criado", r.url || r.nome);
       carregarIcones();
     } else if (r.status === 409) {
       resp.innerHTML = `<div class="resposta nao"><b class="nao">NÃO</b>. Escolha outra URL</div>`;
@@ -351,29 +349,39 @@ async function appIso(c, _o, jid) {
   janelas.get(jid).limpar = () => clearInterval(t);
 }
 
-/* ---- Conexão com o Render ---- */
+/* ---- Conexão (o site abre direto neste PC) ---- */
 async function appRede(c) {
-  const t0 = performance.now();
+  c.innerHTML = `<p class="mudo">Verificando…</p>`;
   await api.ping();
-  const ms = Math.round(performance.now() - t0);
-  const s = api.status, t = s?.tunel || {};
-  const icone = { conectado: "✅ conectado", reconectando: "🔄 reconectando…", desligado: "⏸ iniciando…" };
-  c.innerHTML = `<h2>Conexão com o Render</h2>
-    <p class="mudo">Visitante → Render → <b>este PC</b> → Render → visitante</p>
+  const s = api.status, pc = s?.pc, pub = pc?.publico || {};
+  if (!s) { c.innerHTML = `<h2>Conexão</h2><p>❌ O OneMapas OS deste PC não está rodando.</p>`; return; }
+  const porta = s.porta_sites;
+  let diag;
+  if (pub.porta_aberta) diag = `<div class="resposta sim"><b class="sim">✅ Os sites abrem de fora.</b> O visitante entra direto neste PC em <b>${esc(pub.endereco)}/&lt;nome&gt;/</b></div>`;
+  else if (pub.cgnat) diag = `<div class="resposta nao"><b class="nao">❌ Seu provedor usa CGNAT.</b> O IP deste PC não é público, então ninguém de fora consegue chegar aqui.
+      <ul><li>Peça ao provedor um <b>IP público</b> (alguns cobram, outros liberam ligando para o suporte).</li><li>Ou use internet de outro provedor ou plano.</li></ul></div>`;
+  else if (pub.upnp) diag = `<div class="resposta nao"><b class="nao">⚠️ O roteador abriu a porta ${esc(porta)}, mas o Render ainda não alcança este PC.</b>
+      <ul><li>Confira se o firewall do PC libera a porta ${esc(porta)}.</li><li>Teste de novo em 1 minuto.</li></ul></div>`;
+  else diag = `<div class="resposta nao"><b class="nao">⚠️ A porta ${esc(porta)} está fechada no roteador.</b> O roteador não aceitou abrir sozinho (UPnP${pub.upnp_erro ? ": " + esc(pub.upnp_erro) : ""}).
+      <ul><li>Entre na página do roteador (normalmente <b>192.168.0.1</b> ou <b>192.168.1.1</b>).</li>
+      <li>Procure <b>Redirecionamento de portas / Port Forwarding / Servidor virtual</b>.</li>
+      <li>Crie: porta externa <b>${esc(porta)}</b> → IP <b>${esc(pub.ip_local || "deste PC")}</b>, porta interna <b>${esc(porta)}</b>, TCP.</li>
+      <li>Ou ligue o <b>UPnP</b> no roteador.</li></ul></div>`;
+  c.innerHTML = `<h2>Conexão</h2>
+    <p class="mudo">Visitante → <b>este PC</b> (direto). O Render só guarda os dados no Supabase.</p>
+    ${diag}
     <table>
-      <tr><td>Internet</td><td>${navigator.onLine ? "✅ conectado" : "❌ offline"}</td></tr>
-      ${s ? `<tr><td>Render</td><td>${s.render_online ? "✅ online" : "❌ sem resposta"} · ${esc(s.servidor)}</td></tr>
-      <tr><td>Túnel</td><td>${icone[t.tunel] || esc(t.tunel)}</td></tr>
-      <tr><td>Sites neste PC</td><td>${esc(s.sites)}</td></tr>
-      <tr><td>Cópia no Supabase</td><td>${{ "em dia": "✅ em dia", "com erro": "⚠️ com erro", aguardando: "⏳ aguardando" }[t.copia?.estado] || esc(t.copia?.estado)} · ${esc(t.copia?.arquivos ?? 0)} arquivo(s)${t.copia?.ultima ? " · " + esc(t.copia.ultima.slice(11, 16)) + " UTC" : ""}</td></tr>
-      ${t.copia?.erro ? `<tr><td>Erro da cópia</td><td class="mudo">${esc(t.copia.erro)}</td></tr>` : ""}
-      <tr><td>Pedidos atendidos</td><td>${esc(t.pedidos_atendidos)}</td></tr>
-      <tr><td>Último pedido</td><td class="mudo">${esc(t.ultimo_pedido || "—")}</td></tr>
-      ${t.ultimo_erro ? `<tr><td>Último erro</td><td class="mudo">${esc(t.ultimo_erro)}</td></tr>` : ""}
-      <tr><td>Interface local</td><td>${ms} ms</td></tr>` : `<tr><td>OneMapas OS</td><td>❌ não está rodando</td></tr>`}
+      <tr><td>IP público</td><td>${esc(pub.ip || "—")}</td></tr>
+      <tr><td>IP na rede local</td><td>${esc(pub.ip_local || "—")}</td></tr>
+      <tr><td>Porta dos sites</td><td>${esc(porta)} ${pub.porta_aberta ? "✅ aberta" : pub.porta_aberta === false ? "❌ fechada" : "⏳"}</td></tr>
+      <tr><td>Roteador (UPnP)</td><td>${pub.upnp ? "✅ abriu a porta" : pub.upnp === false ? "❌ " + esc(pub.upnp_erro || "não respondeu") : "⏳"}</td></tr>
+      <tr><td>Render</td><td>${pc.render === "ok" ? "✅ recebeu o sinal" : "❌ " + esc(pc.render)} ${pc.ultima_batida ? "· " + esc(pc.ultima_batida.slice(11, 16)) + " UTC" : ""} <span class="mudo">(a cada 5 min)</span></td></tr>
+      <tr><td>Cópia no Supabase</td><td>${{ "em dia": "✅ em dia", "com erro": "⚠️ com erro", aguardando: "⏳ aguardando" }[pc.copia?.estado] || esc(pc.copia?.estado)} · ${esc(pc.copia?.arquivos ?? 0)} arquivo(s)</td></tr>
+      <tr><td>Visitas</td><td>${esc(pc.visitas)} ${pc.ultima_visita ? `<span class="mudo">· ${esc(pc.ultima_visita)}</span>` : ""}</td></tr>
+      ${pc.ultimo_erro ? `<tr><td>Último erro</td><td class="mudo">${esc(pc.ultimo_erro)}</td></tr>` : ""}
     </table>
-    <div class="linha" style="margin-top:12px"><button class="btn" id="rd-at">Atualizar</button></div>`;
-  $("#rd-at", c).onclick = () => appRede(c);
+    <div class="linha" style="margin-top:12px"><button class="btn prim" id="rd-testar">Testar de novo</button></div>`;
+  $("#rd-testar", c).onclick = async () => { $("#rd-testar", c).disabled = true; $("#rd-testar", c).textContent = "Testando…"; await api.post("/testar-porta"); appRede(c); };
 }
 
 /* ---- Terminal ---- */
@@ -392,7 +400,7 @@ function appTerminal(c) {
     editar: (a) => { if (!a) return "uso: editar oi"; abrirApp("editor", { site: a }); return ""; },
     verificar: async (a) => { if (!a) return "uso: verificar oi"; const v = await api.get("/verificar?nome=" + encodeURIComponent(a)); return `${v.url}: ${v.disponivel ? "SIM, disponível" : "NÃO. Escolha outra URL"}`; },
     sites: async () => ((await api.get("/meus-sites")).sites || []).map((s) => `${s.nome}\t${s.url}`).join("\n") || "(nenhum site)",
-    status: async () => { await api.ping(); const s = api.status; return s ? `render ${s.render_online ? "online" : "offline"} · túnel ${s.tunel.tunel} · ${s.sites} site(s) · ${s.tunel.pedidos_atendidos} pedidos` : "OneMapas OS fora do ar"; },
+    status: async () => { await api.ping(); const s = api.status; if (!s) return "OneMapas OS fora do ar"; const p = s.pc.publico; return `render ${s.pc.render} · ${p.endereco || "sem IP público"} · porta ${s.porta_sites} ${p.porta_aberta ? "aberta" : "fechada"} · ${s.sites} site(s) · ${s.pc.visitas} visitas`; },
   };
   inp.addEventListener("keydown", async (e) => {
     if (e.key === "ArrowUp" && hi > 0) { inp.value = hist[--hi]; return; }
@@ -460,8 +468,8 @@ function appSobre(c) {
   const s = api.status;
   c.innerHTML = `<h2>OneMapas OS</h2><p>Versão ${esc(s?.versao || "?")}</p>
     <p>Sistema da One Mapas Office para criar sites. O site roda <b>neste PC</b> (pasta na Área de Trabalho) e fica no ar em
-      <b>&lt;nome&gt;.${esc(DOMINIO_SITES())}</b>. O Render faz a ponte entre os visitantes e este PC.</p>
-    <p class="mudo">Visitante → Render → PC → Render → visitante · ISO: Linux puro (kernel + BusyBox).</p>
+      <b>${esc(BASE_SITES())}/&lt;nome&gt;/</b>. O visitante abre direto neste PC; o Render só guarda os dados no Supabase.</p>
+    <p class="mudo">Visitante → PC (direto) · sinal ao Render a cada 5 min · ISO: Linux puro (kernel + BusyBox).</p>
     <p class="mudo">Interface: OneMapas Shell (estilos Windows, Mint e Mac).</p>`;
 }
 

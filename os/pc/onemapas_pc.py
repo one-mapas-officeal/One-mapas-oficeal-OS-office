@@ -7,19 +7,17 @@ OneMapas OS - PC (o servidor onde o site roda).
 O que ele faz:
   1. Interface gráfica (área de trabalho estilo Windows / Mint / Mac) só para este PC.
   2. Cria os sites numa pasta da Área de Trabalho: "Meus Sites OneMapas/<nome>/".
-  3. Envia uma cópia de cada site para o Supabase (pelo Render). Se o PC desligar,
-     os visitantes veem a cópia em vez de "PC desligado".
-  4. Liga o PC ao Render por um túnel: o PC busca os pedidos dos visitantes no Render,
-     responde com os arquivos da pasta do site, e o Render entrega ao visitante.
-        Cliente -> Render -> PC -> Render -> Cliente
-     Funciona atrás de roteador/CGNAT, sem abrir portas.
+  3. SERVE OS SITES DIRETO: o visitante abre http://IP-do-PC:8090/<nome>/ (porta "porta_sites").
+     O PC tenta abrir essa porta no roteador sozinho (UPnP).
+  4. A cada 5 minutos manda um sinal ao Render: o Render grava no Supabase o endereço atual
+     do PC (o IP muda), testa se a porta está aberta de fora e fica acordado.
+  5. Envia uma cópia de cada site ao Supabase (pelo Render), como backup.
 
 Este PC é o dono dos sites: ele tem uma chave secreta (~/.config/onemapas/config.json),
 e o Render guarda só o hash dela.
 
 Só usa a biblioteca padrão do Python.
 """
-import base64
 import hashlib
 import hmac
 import json
@@ -45,29 +43,37 @@ RAIZ = AQUI.parent.parent
 WEBUI = Path(os.environ.get("ONEMAPAS_WEBUI", AQUI.parent / "webui"))
 CONFIG_DIR = Path(os.environ.get("ONEMAPAS_CONFIG", Path.home() / ".config" / "onemapas"))
 CONFIG_FILE = CONFIG_DIR / "config.json"
-VERSAO = "0.4.0"
+VERSAO = "0.5.0"
 
 PADRAO = {
     "servidor": os.environ.get("ONEMAPAS_SERVIDOR", "https://onemapas-gateway.onrender.com"),
     "dono": socket.gethostname(),
     "chave": "",
+    "porta_sites": int(os.environ.get("ONEMAPAS_PORTA_SITES", "8090")),
 }
 NOME_VALIDO = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 CAMINHO_VALIDO = re.compile(r"^(?:[A-Za-z0-9_][A-Za-z0-9_.-]{0,80}/){0,5}[A-Za-z0-9_][A-Za-z0-9_.-]{0,80}$")
 META = "onemapas-site.json"
 MAX_ARQUIVO_EDITOR = 1024 * 1024
-TRABALHADORES_TUNEL = 4
 # Modo rede (ISO de Linux puro): a interface é aberta de outro aparelho (celular) pelo IP do PC,
 # só com o código de acesso que aparece na tela do PC.
 LAN = os.environ.get("ONEMAPAS_LAN") == "1"
 IP_LITERAL = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 tentativas_pin = {}
 
-estado = {"tunel": "desligado", "ultimo_erro": None, "pedidos_atendidos": 0, "ultimo_pedido": None,
-          "copia": {"estado": "aguardando", "ultima": None, "arquivos": 0, "erro": None}}
+estado = {
+    "render": "aguardando",          # sinal de 5 em 5 min: "ok" | "sem conexão"
+    "ultima_batida": None, "ultimo_erro": None,
+    "publico": {"ip": None, "porta": None, "porta_aberta": None, "endereco": None,
+                "upnp": None, "upnp_erro": None, "ip_local": None, "cgnat": None},
+    "visitas": 0, "ultima_visita": None,
+    "copia": {"estado": "aguardando", "ultima": None, "arquivos": 0, "erro": None},
+}
 MAX_ARQUIVO_COPIA = 5 * 1024 * 1024
-INTERVALO_COPIA = 30
+INTERVALO_BATIDA = 5 * 60    # sinal ao Render (mantém ele acordado e atualiza o IP do PC)
+INTERVALO_COPIA = 5 * 60     # cópia ao Supabase (e na hora, quando salva pela interface)
 acordar_copia = threading.Event()
+acordar_batida = threading.Event()
 
 
 def agora():
@@ -130,9 +136,14 @@ def _gravar(cfg):
 def salvar_config(novo):
     cfg = config()
     with _trava_cfg:
-        for k in ("servidor", "dono", "chave"):
+        for k in ("servidor", "dono", "chave", "porta_sites"):
             v = str(novo.get(k) or "").strip()
             if not v:
+                continue
+            if k == "porta_sites":
+                if not v.isdigit() or not 1024 <= int(v) <= 65535:
+                    return False
+                cfg[k] = int(v)
                 continue
             if k == "chave" and not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", v):
                 return False
@@ -183,9 +194,9 @@ def render(metodo, rota, dados=None, timeout=15):
         return None, {"mensagem": f"Sem conexão com o Render ({e.__class__.__name__})."}
 
 
-# ------------------------------------------------------------------ túnel: atende os visitantes
+# ------------------------------------------------------------------ servidor público dos sites (visitantes)
 def servir_arquivo_local(nome, metodo, caminho):
-    """Responde um pedido de visitante com os arquivos da pasta do site."""
+    """Responde um visitante com os arquivos da pasta do site."""
     base = (pasta_sites() / nome).resolve()
     if not base.is_dir():
         return 404, {"Content-Type": "text/html; charset=utf-8"}, b"<h1>404</h1><p>Pasta do site nao existe neste PC.</p>"
@@ -209,30 +220,106 @@ def servir_arquivo_local(nome, metodo, caminho):
     return 200, {"Content-Type": tipo, "Cache-Control": "no-cache"}, corpo
 
 
-def trabalhador_tunel(n):
-    espera_erro = 2
+class HandlerSites(BaseHTTPRequestHandler):
+    """Porta pública (8090): só entrega os arquivos dos sites. Nada de interface, API ou configuração."""
+    server_version = "OneMapas"
+
+    def log_message(self, fmt, *args):
+        sys.stderr.write("[sites] %s %s\n" % (self.client_address[0], fmt % args))
+
+    def responder(self, status, cab, corpo):
+        self.send_response(status)
+        for k, v in cab.items():
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(corpo)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(corpo)
+
+    def do_GET(self):
+        caminho = urllib.parse.urlsplit(self.path).path
+        if caminho == "/_onemapas":  # o Render testa se a porta está aberta
+            return self.responder(200, {"Content-Type": "text/plain"}, b"ok")
+        partes = [x for x in caminho.split("/") if x]
+        if not partes:
+            itens = "".join(f'<li><a href="/{s["nome"]}/">{s["titulo"].replace("<", "&lt;")}</a></li>' for s in meus_sites())
+            pag = (f'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+                   f'<title>Sites deste PC</title><body style="font-family:system-ui;max-width:640px;margin:40px auto;padding:0 16px">'
+                   f'<h1>Sites deste PC</h1><ul>{itens or "<li>Nenhum site ainda.</li>"}</ul>'
+                   f'<p style="color:#888">OneMapas OS</p>').encode()
+            return self.responder(200, {"Content-Type": "text/html; charset=utf-8"}, pag)
+        nome = partes[0]
+        if not NOME_VALIDO.match(nome) or not (pasta_sites() / nome).is_dir():
+            return self.responder(404, {"Content-Type": "text/html; charset=utf-8"}, b"<h1>404</h1><p>Site nao existe neste PC.</p>")
+        if len(partes) == 1 and not caminho.endswith("/"):
+            return self.responder(301, {"Location": f"/{nome}/"}, b"")
+        status, cab, corpo = servir_arquivo_local(nome, self.command, "/" + "/".join(partes[1:]) + ("/" if caminho.endswith("/") else ""))
+        estado["visitas"] += 1
+        estado["ultima_visita"] = f"{agora()} {nome}{caminho[len(nome) + 1:][:60]} -> {status}"
+        self.responder(status, cab, corpo)
+
+    do_HEAD = do_GET
+
+
+def link_site(nome):
+    end = estado["publico"].get("endereco")
+    return f"{end}/{nome}/" if end else ""
+
+
+def eh_cgnat(ip):
+    """IP do roteador em faixa de CGNAT (100.64.0.0/10) ou privada: o provedor não dá IP público."""
+    try:
+        import ipaddress
+        a = ipaddress.ip_address(ip)
+        return a in ipaddress.ip_network("100.64.0.0/10") or a.is_private
+    except Exception:
+        return None
+
+
+def bater():
+    """Sinal ao Render: (re)abre a porta no roteador por UPnP e informa a porta; o Render testa e grava no Supabase."""
+    porta = int(config()["porta_sites"])
+    pub = estado["publico"]
+    try:
+        sys.path.insert(0, str(AQUI))
+        import upnp
+        u = upnp.abrir_porta(porta)
+        pub.update(upnp=u["ok"], upnp_erro=u["erro"], ip_local=u["ip_local"] or pub.get("ip_local"))
+        if u["ip_externo"]:
+            pub["ip_roteador"] = u["ip_externo"]
+            pub["cgnat"] = eh_cgnat(u["ip_externo"])
+    except Exception as e:
+        pub.update(upnp=False, upnp_erro=str(e)[:120])
+    if not pub.get("ip_local"):
+        try:  # IP deste PC na rede local (não envia nada: só pergunta ao sistema qual placa sairia)
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as so:
+                so.connect(("1.1.1.1", 53))
+                pub["ip_local"] = so.getsockname()[0]
+        except OSError:
+            pass
+    st, r = render("POST", "/api/pc/batida", {"porta": porta}, timeout=30)
+    if st == 200:
+        estado["render"] = "ok"
+        estado["ultima_batida"] = agora()
+        pub.update(ip=r.get("ip_publico"), porta=porta, porta_aberta=r.get("porta_aberta"), endereco=r.get("endereco"))
+        # o roteador diz um IP e o Render vê outro: há um NAT do provedor no meio (CGNAT)
+        if pub.get("ip_roteador") and r.get("ip_publico") and pub["ip_roteador"] != r["ip_publico"]:
+            pub["cgnat"] = True
+    else:
+        estado["render"] = "sem conexão"
+        estado["ultimo_erro"] = f"{agora()} {r.get('mensagem', st)}"
+
+
+def trabalhador_batida():
     while True:
-        st, ped = render("GET", "/_tunel/esperar", timeout=40)
-        if st == 204:
-            estado["tunel"] = "conectado"
-            espera_erro = 2
-            continue
-        if st != 200:
-            estado["tunel"] = "reconectando"
-            estado["ultimo_erro"] = f"{agora()} {ped.get('mensagem', st)}"
-            time.sleep(espera_erro)
-            espera_erro = min(espera_erro * 2, 30)
-            continue
-        estado["tunel"] = "conectado"
-        espera_erro = 2
         try:
-            status, cab, corpo = servir_arquivo_local(ped["site"], ped["metodo"], ped["caminho"])
+            bater()
         except Exception as e:
-            status, cab, corpo = 500, {"Content-Type": "text/plain"}, f"erro no PC: {e}".encode()
-        render("POST", f"/_tunel/responder/{ped['id']}",
-               {"status": status, "cabecalhos": cab, "corpo_b64": base64.b64encode(corpo).decode()}, timeout=30)
-        estado["pedidos_atendidos"] += 1
-        estado["ultimo_pedido"] = f"{agora()} {ped['metodo']} {ped['site']}{ped['caminho'][:80]} -> {status}"
+            estado["ultimo_erro"] = f"{agora()} {e}"[:200]
+        acordar_batida.wait(INTERVALO_BATIDA)
+        acordar_batida.clear()
 
 
 # ------------------------------------------------------------------ cópia no Supabase (pelo Render)
@@ -354,7 +441,7 @@ def meus_sites():
     for p in sorted(pasta_sites().iterdir()):
         if p.is_dir() and NOME_VALIDO.match(p.name):
             m = ler_meta(p.name)
-            res.append({"nome": p.name, "url": m.get("url", ""), "titulo": m.get("titulo", p.name),
+            res.append({"nome": p.name, "url": link_site(p.name), "titulo": m.get("titulo", p.name),
                         "criado_em": m.get("criado_em"), "atualizado_em": m.get("atualizado_em"),
                         "pasta": str(p)})
     return res
@@ -390,11 +477,12 @@ def criar(dados):
     pasta.mkdir(parents=True, exist_ok=True)
     (pasta / "index.html").write_text(html, "utf-8")
     (pasta / "style.css").write_text(css, "utf-8")
-    meta = {"nome": nome, "titulo": titulo, "url": r.get("url") or v.get("url"), "dono": cfg["dono"],
-            "criado_em": agora(), "atualizado_em": agora()}
+    meta = {"nome": nome, "titulo": titulo, "dono": cfg["dono"], "criado_em": agora(), "atualizado_em": agora()}
     (pasta / META).write_text(json.dumps(meta, indent=2, ensure_ascii=False), "utf-8")
     acordar_copia.set()
-    return 201, {**v, "url": meta["url"], "pasta": str(pasta), "mensagem": "Site criado!"}
+    bater()  # grava já o endereço deste PC no novo site
+    return 201, {**v, "url": link_site(nome), "porta_aberta": estado["publico"].get("porta_aberta"),
+                 "pasta": str(pasta), "mensagem": "Site criado!"}
 
 
 def caminho_seguro(nome, caminho):
@@ -521,8 +609,8 @@ class Handler(BaseHTTPRequestHandler):
             cfg = config()
             st, r = render("GET", "/api/status", timeout=6)
             return self.enviar(200, {"ok": True, "versao": VERSAO, "dono": cfg["dono"], "servidor": cfg["servidor"],
-                                     "render_online": st == 200, "dominio_sites": r.get("dominio_sites", ""), "url_base": r.get("url_base", ""),
-                                     "sites": len(meus_sites()), "tunel": estado, "pasta": str(pasta_sites())})
+                                     "render_online": st == 200, "porta_sites": cfg["porta_sites"],
+                                     "sites": len(meus_sites()), "pc": estado, "pasta": str(pasta_sites())})
         if u.path == "/api/verificar":
             return self.enviar(200, verificar(q.get("nome", [""])[0]))
         if u.path == "/api/meus-sites":
@@ -537,7 +625,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/config":
             cfg = config()
             return self.enviar(200, {"servidor": cfg["servidor"], "dono": cfg["dono"], "chave": cfg["chave"],
-                                     "pasta": str(pasta_sites())})
+                                     "porta_sites": cfg["porta_sites"], "pasta": str(pasta_sites())})
         m = re.fullmatch(r"/api/sites/([a-z0-9-]+)/(arquivos|arquivo)", u.path)
         if m:
             nome = m.group(1)
@@ -564,7 +652,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/criar":
             return self.enviar(*criar(dados))
         if self.path == "/api/config":
-            return self.enviar(200 if salvar_config(dados) else 400, {"ok": True})
+            ok = salvar_config(dados)
+            if ok:
+                acordar_batida.set()
+            return self.enviar(200 if ok else 400, {"ok": ok})
+        if self.path == "/api/testar-porta":
+            bater()
+            return self.enviar(200, estado["publico"])
         if self.path == "/api/abrir-pasta":
             nome = str(dados.get("nome", ""))
             alvo = pasta_sites() / nome if NOME_VALIDO.match(nome) else pasta_sites()
@@ -620,15 +714,16 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     cfg = config()
-    for i in range(TRABALHADORES_TUNEL):
-        threading.Thread(target=trabalhador_tunel, args=(i,), daemon=True).start()
+    porta_sites = int(cfg["porta_sites"])
+    threading.Thread(target=ThreadingHTTPServer(("0.0.0.0", porta_sites), HandlerSites).serve_forever, daemon=True).start()
+    threading.Thread(target=trabalhador_batida, daemon=True).start()
     threading.Thread(target=trabalhador_copia, daemon=True).start()
     acordar_copia.set()
     porta = int(os.environ.get("ONEMAPAS_PORTA", "8080"))
     if LAN and os.environ.get("ONEMAPAS_PIN_ARQ"):
         Path(os.environ["ONEMAPAS_PIN_ARQ"]).write_text(cfg["pin"])
     print(f"OneMapas OS {VERSAO} (PC) em http://{'0.0.0.0' if LAN else '127.0.0.1'}:{porta}\n"
-          f"  sites em: {pasta_sites()}\n  Render: {cfg['servidor']}", flush=True)
+          f"  sites em: {pasta_sites()}\n  visitantes: http://<IP>:{porta_sites}/<nome>/\n  Render: {cfg['servidor']}", flush=True)
     ThreadingHTTPServer(("0.0.0.0" if LAN else "127.0.0.1", porta), Handler).serve_forever()
 
 

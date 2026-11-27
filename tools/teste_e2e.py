@@ -3,8 +3,8 @@
 
   python3 tools/teste_e2e.py https://onemapas-gateway.onrender.com
 
-Cria um site de teste, confere que o visitante recebe o site vindo do PC (túnel), que a cópia
-chegou ao Supabase, que com o PC desligado o visitante recebe a cópia, e apaga tudo no fim.
+O visitante abre o site DIRETO no PC (http://IP:8090/<nome>/). O Render só guarda dados no Supabase
+(registro, endereço do PC enviado a cada 5 min, cópia) e o link com nome só redireciona para o PC.
 """
 import json, os, subprocess, sys, tempfile, time, urllib.request, urllib.error
 
@@ -12,15 +12,23 @@ GW = sys.argv[1].rstrip("/")
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TMP = tempfile.mkdtemp(prefix="onemapas-e2e-")
 NOME = f"teste-e2e-{int(time.time()) % 100000}"
-PC = "http://127.0.0.1:8081"
+PC, SITES = "http://127.0.0.1:8081", "http://127.0.0.1:8090"
 resultados = []
 
 
-def req(url, metodo="GET", dados=None, cab=None, timeout=60):
+class SemRedirecionar(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+ABRIR = urllib.request.build_opener(SemRedirecionar)
+
+
+def req(url, metodo="GET", dados=None, timeout=60):
     r = urllib.request.Request(url, method=metodo, data=json.dumps(dados).encode() if dados is not None else None,
-                               headers={"Content-Type": "application/json", "X-OneMapas": "1", **(cab or {})})
+                               headers={"Content-Type": "application/json", "X-OneMapas": "1"})
     try:
-        with urllib.request.urlopen(r, timeout=timeout) as resp:
+        with ABRIR.open(r, timeout=timeout) as resp:
             return resp.status, {k.lower(): v for k, v in resp.headers.items()}, resp.read().decode(errors="replace")
     except urllib.error.HTTPError as e:
         return e.code, {k.lower(): v for k, v in e.headers.items()}, e.read().decode(errors="replace")
@@ -30,11 +38,11 @@ def req(url, metodo="GET", dados=None, cab=None, timeout=60):
 
 def ok(nome, cond, detalhe=""):
     resultados.append((nome, bool(cond)))
-    print(("✅" if cond else "❌"), nome, ("- " + detalhe) if detalhe else "", flush=True)
+    print(("✅" if cond else "❌"), nome, ("- " + str(detalhe)[:200]) if detalhe else "", flush=True)
     return cond
 
 
-def esperar(fn, seg, passo=3):
+def esperar(fn, seg, passo=2):
     fim = time.time() + seg
     while time.time() < fim:
         v = fn()
@@ -46,7 +54,7 @@ def esperar(fn, seg, passo=3):
 
 def ligar_pc():
     env = {**os.environ, "ONEMAPAS_SERVIDOR": GW, "ONEMAPAS_SITES": f"{TMP}/sites", "ONEMAPAS_CONFIG": f"{TMP}/cfg",
-           "ONEMAPAS_PORTA": "8081"}
+           "ONEMAPAS_PORTA": "8081", "ONEMAPAS_PORTA_SITES": "8090"}
     env.pop("ONEMAPAS_LAN", None)
     return subprocess.Popen([sys.executable, f"{RAIZ}/os/pc/onemapas_pc.py"], env=env,
                             stdout=open(f"{TMP}/pc.log", "a"), stderr=subprocess.STDOUT)
@@ -58,54 +66,48 @@ def status():
 
 
 # 0) acorda o Render (o plano grátis dorme)
-st, _, c = esperar(lambda: (lambda r: r if r[0] == 200 else None)(req(f"{GW}/api/status")), 180, 5) or (None, {}, "")
-ok("Render responde /api/status", st == 200, c[:160])
-if st == 200:
-    info = json.loads(c)
-    ok("Render usa o Supabase", info.get("banco", {}).get("tipo") == "supabase", json.dumps(info.get("banco")))
+r = esperar(lambda: (lambda x: x if x[0] == 200 else None)(req(f"{GW}/api/status")), 180, 5) or (None, {}, "")
+ok("Render responde /api/status", r[0] == 200, r[2][:120])
+if r[0] == 200:
+    banco = json.loads(r[2]).get("banco", {})
+    ok("Render usa o Supabase", banco.get("tipo") == "supabase", json.dumps(banco))
 
 pc = ligar_pc()
 try:
     esperar(status, 30, 1)
-    ok("Túnel do PC conectou", esperar(lambda: (status() or {}).get("tunel", {}).get("tunel") == "conectado", 60))
-
+    ok("PC mandou o sinal ao Render", esperar(lambda: (status() or {}).get("pc", {}).get("render") == "ok", 90))
     st, _, c = req(f"{PC}/api/verificar?nome={NOME}")
-    ok(f"{NOME} está disponível", st == 200 and json.loads(c).get("disponivel"), c[:120])
+    ok(f"{NOME} está disponível", st == 200 and json.loads(c).get("disponivel"), c[:100])
     st, _, c = req(f"{PC}/api/criar", "POST", {"nome": NOME, "titulo": "Teste E2E OneMapas", "descricao": "ok"})
     ok("Criar site (registro no Supabase)", st == 201, c[:200])
     st, _, c = req(f"{GW}/api/verificar?nome={NOME}")
     ok("Depois de criado: Escolha outra URL", st == 200 and not json.loads(c).get("disponivel"))
 
-    url = f"{GW}/_site/{NOME}/?sistema=onemapasoficealOS&site=true&load=conectado"
-    st, h, c = req(url)
-    ok("Visitante recebe o site vindo do PC", st == 200 and "Teste E2E OneMapas" in c and h.get("x-onemapas-origem") == "pc",
-       f"HTTP {st} origem={h.get('x-onemapas-origem')}")
-    st, h, c = req(f"{GW}/_site/{NOME}/style.css")
-    ok("style.css vem do PC", st == 200 and "--cor" in c)
+    st, h, c = req(f"{SITES}/{NOME}/")
+    ok("Visitante abre o site DIRETO no PC (porta 8090)", st == 200 and "Teste E2E OneMapas" in c, f"HTTP {st}")
+    st, h, c = req(f"{SITES}/{NOME}/style.css")
+    ok("style.css vem direto do PC", st == 200 and "--cor" in c)
+    st, h, c = req(f"{SITES}/{NOME}/onemapas-site.json")
+    ok("Arquivo interno do site fica escondido", st == 404)
+    st, h, c = req(f"{SITES}/{NOME}/../../cfg/config.json")
+    ok("Não sai da pasta do site", st in (400, 403, 404) and "chave" not in c, f"HTTP {st}")
 
-    ok("Cópia enviada ao Supabase", esperar(lambda: (lambda s: s and s["tunel"]["copia"]["estado"] == "em dia"
-                                                     and s["tunel"]["copia"]["arquivos"] >= 2)(status()), 90),
-       json.dumps((status() or {}).get("tunel", {}).get("copia")))
-finally:
-    pc.terminate(); pc.wait(10)
+    s = status() or {}
+    pub = s.get("pc", {}).get("publico", {})
+    print("   IP público:", pub.get("ip"), "| porta aberta de fora:", pub.get("porta_aberta"), "| UPnP:", pub.get("upnp"), pub.get("upnp_erro") or "")
+    st, _, c = req(f"{GW}/_site/{NOME}/_onemapas/estado")
+    est = json.loads(c) if st == 200 else {}
+    ok("Supabase guardou o endereço do PC", est.get("online") is True and (est.get("link") or "").endswith(f"/{NOME}/"), c)
+    st, h, c = req(f"{GW}/_site/{NOME}/")
+    ok("Link com nome no Render só REDIRECIONA para o PC", st == 302 and h.get("location", "").endswith(f"/{NOME}/"),
+       f"HTTP {st} -> {h.get('location')}")
 
-# 3) PC desligado -> cópia
-print("… PC desligado, esperando o Render perceber (~35 s)", flush=True)
-time.sleep(38)
-st, h, c = req(f"{GW}/_site/{NOME}/_onemapas/estado")
-ok("Render sabe que o PC desligou e que há cópia", st == 200 and json.loads(c) == {"site": NOME, "online": False, "copia": True}, c)
-st, h, c = req(url)
-ok("Visitante recebe a CÓPIA do Supabase", st == 200 and "Teste E2E OneMapas" in c and h.get("x-onemapas-origem") == "copia-supabase",
-   f"HTTP {st} origem={h.get('x-onemapas-origem')}")
-st, h, c = req(f"{GW}/_site/{NOME}/style.css")
-ok("style.css vem da cópia", st == 200 and "--cor" in c and h.get("x-onemapas-origem") == "copia-supabase")
+    ok("Cópia enviada ao Supabase", esperar(lambda: (lambda s: s and s["pc"]["copia"]["estado"] == "em dia"
+                                                     and s["pc"]["copia"]["arquivos"] >= 2)(status()), 90),
+       json.dumps((status() or {}).get("pc", {}).get("copia")))
 
-# 4) limpeza: liga o PC de novo e apaga o site (registro + cópia)
-pc = ligar_pc()
-try:
-    esperar(status, 30, 1)
     st, _, c = req(f"{PC}/api/sites/{NOME}", "DELETE")
-    ok("Apagar site de teste", st == 200, c[:160])
+    ok("Apagar site de teste", st == 200, c[:120])
 finally:
     pc.terminate(); pc.wait(10)
 st, _, c = req(f"{GW}/api/verificar?nome={NOME}")

@@ -16,28 +16,28 @@ https://[URL escolhida].onemapasos.oficeal.com/?sistema=onemapasoficealOS&site=t
 ## Como funciona
 
 ```
-Cliente (navegador) ──► Render ──► PC do dono (onde o site roda)
-Cliente ◄────────────── Render ◄── PC
+Visitante ──────────────► PC do dono   http://IP-do-PC:8090/<nome>/   (o PC entrega o site)
+PC ── sinal a cada 5 min ──► Render ──► Supabase   (endereço do PC, registro, cópia)
 ```
 
-1. **Cliente → Render**: o visitante abre `https://oi.onemapasos.oficeal.com`. O Render mostra a tela de espera (`load=em-espera`).
-2. **Render → PC**: o Render repassa o pedido para o PC dono do site `oi`.
-3. **PC → Render → Cliente**: o PC lê a pasta do site na Área de Trabalho e responde. O Render entrega ao visitante (`load=conectado`).
-
-O PC **se conecta ao Render primeiro** e fica esperando pedidos (túnel por *long-polling*).
-Por isso funciona em internet de casa ou 4G com CGNAT, sem abrir portas no roteador e sem IP fixo.
-### Supabase (projeto Mapasos)
-- **Tabela `public.sites`**: qual nome pertence a qual PC (hash da chave do PC). A chave primária impede dois PCs com o mesmo nome.
-- **Bucket `sites`**: cópia dos arquivos de cada site. O PC envia pelo Render só o que mudou (verificado a cada 30 s e na hora em que salva).
-- **PC desligado**: o Render mostra a cópia do Supabase (`X-OneMapas-Origem: copia-supabase`), e o site continua no ar.
-  Sem cópia, o visitante vê "O PC do dono está desligado".
-- A chave secreta do Supabase fica **só no Render**. RLS ligado e nenhum acesso para `anon`/`authenticated`.
+- **O visitante abre o site direto no PC**, na porta **8090**. O Render não entrega o site.
+- **A cada 5 minutos o PC manda um sinal ao Render.** O sinal mantém o Render acordado; o Render grava no Supabase
+  o endereço atual do PC (o IP muda) e testa se a porta 8090 está aberta de fora.
+- **Porta no roteador:** o PC tenta abrir sozinho (UPnP). Se o roteador não deixar, o app **Conexão** mostra o passo a passo
+  (redirecionar a porta 8090 para o IP do PC). Se o provedor usa **CGNAT**, só com IP público do provedor.
+- **Link com nome:** `<nome>.onemapasos.oficeal.com` (ou `onemapas-gateway.onrender.com/_site/<nome>/`) só **redireciona** para o PC.
+- **Cópia:** os arquivos também vão para o Supabase Storage, como backup.
 
 ### Criando um site (no PC)
-O usuário digita a URL e o sistema pergunta ao Render: *está disponível?*
+O usuário digita o nome e o sistema pergunta ao Render/Supabase: *está disponível?*
 - **SIM**: o nome fica registrado para este PC, e a pasta `Área de Trabalho/Meus Sites OneMapas/<nome>/` é criada.
   O PC é o dono (tem uma chave secreta em `~/.config/onemapas/config.json`; o Render guarda só o hash).
 - **NÃO**: **"Escolha outra URL"**.
+
+### Supabase (projeto Mapasos)
+- **Tabela `public.sites`**: nome, hash da chave do PC dono, `pc_endereco` (http://IP:porta), `visto_em` (último sinal), `porta_aberta`.
+- **Bucket `sites`**: cópia dos arquivos.
+- A chave secreta do Supabase fica **só no Render**. RLS ligado e nenhum acesso para `anon`/`authenticated`.
 
 ## Interface (no PC)
 
@@ -54,8 +54,8 @@ Conexão com o Render, Terminal, Configurações.
 
 ```
 os/
-  render/gateway.py   roda no Render: portal, registro (Supabase), túnel, proxy e cópia dos sites
-  pc/onemapas_pc.py   roda no PC: interface, pasta dos sites, túnel até o Render e envio da cópia
+  render/gateway.py   roda no Render: registro dos nomes, sinal do PC, teste de porta e redirecionamento (Supabase)
+  pc/onemapas_pc.py   roda no PC: interface, servidor dos sites (porta 8090), UPnP, sinal de 5 min e cópia
   webui/              interface gráfica + novidades.json
   network/            ajustes dos drivers de rede (modprobe)
   iso/                rootfs da ISO (init, rede, disco, painel) + GRUB

@@ -1,6 +1,20 @@
 {
   "novidades": [
     {
+      "versao": "0.3.0",
+      "canal": "beta",
+      "data": "27/11/2026",
+      "titulo": "O visitante abre o site direto no PC",
+      "itens": [
+        "Link do site: http://IP-do-PC:8090/<nome>/, entregue pelo próprio PC",
+        "O Render não entrega mais os sites: só guarda os dados no Supabase",
+        "Sinal a cada 5 minutos: mantém o Render acordado e atualiza o IP do PC no Supabase",
+        "O PC tenta abrir a porta 8090 no roteador sozinho (UPnP)",
+        "O Render testa se a porta está aberta de fora, e o app Conexão explica o que fazer (porta fechada, CGNAT)",
+        "O link com nome (onemapasos.oficeal.com) só redireciona para o PC"
+      ]
+    },
+    {
       "versao": "0.2.1",
       "canal": "beta",
       "data": "27/11/2026",

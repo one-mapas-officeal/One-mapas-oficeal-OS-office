@@ -1,5 +1,5 @@
 {
   "descricao": "Mude este arquivo para rodar o teste de ponta a ponta no GitHub Actions.",
   "gateway": "https://onemapas-gateway.onrender.com",
-  "rodada": 2
+  "rodada": 3
 }

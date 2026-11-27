@@ -61,11 +61,16 @@ def tela():
     else:
         print(f"  {VERM}Sem rede.{FIM} Ligue o cabo ou use a opcao 1 (Wi-Fi).\n")
     if s:
-        t = s["tunel"]
-        tun = {"conectado": f"{VERDE}conectado{FIM}", "reconectando": f"{AMAR}reconectando...{FIM}"}.get(t["tunel"], t["tunel"])
-        print(f"  Render:   {tun}  {CINZA}{s['servidor']}{FIM}")
-        print(f"  Sites:    {s['sites']}   pedidos atendidos: {t['pedidos_atendidos']}")
-        c = t.get("copia", {})
+        pc, pub = s["pc"], s["pc"]["publico"]
+        if pub.get("porta_aberta"):
+            print(f"  Sites:    {VERDE}{NEG}{pub['endereco']}/<nome>/{FIM}  {VERDE}(abre de fora){FIM}")
+        elif pub.get("cgnat"):
+            print(f"  Sites:    {VERM}provedor com CGNAT: peca um IP publico ao provedor{FIM}")
+        else:
+            print(f"  Sites:    {AMAR}porta {s['porta_sites']} fechada: abra no roteador para {pub.get('ip_local') or 'este PC'}{FIM}")
+        rend = f"{VERDE}ok{FIM}" if pc["render"] == "ok" else f"{AMAR}{pc['render']}{FIM}"
+        print(f"  Render:   {rend} {CINZA}(sinal a cada 5 min){FIM}   sites: {s['sites']}   visitas: {pc['visitas']}")
+        c = pc.get("copia", {})
         print(f"  Copia:    {c.get('estado', '?')} ({c.get('arquivos', 0)} arquivos no Supabase)")
     else:
         print(f"  Servidor: {AMAR}iniciando...{FIM}")

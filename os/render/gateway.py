@@ -2,20 +2,17 @@
 """
 OneMapas OS - GATEWAY (roda no Render).
 
-O site de cada pessoa roda no PC dela. O Render só faz a ponte:
+O site de cada pessoa roda NO PC DELA, e o visitante abre direto no PC:
 
-    Cliente (navegador) ──> Render ──> PC do dono (onde o site roda)
-    Cliente <── Render <── PC
+    Visitante ──> http://IP-do-PC:8090/<nome>/      (o Render não entrega o site)
 
-O PC abre a conexão com o Render (assim funciona mesmo atrás de roteador/CGNAT,
-sem abrir portas) e fica esperando pedidos (long-polling). Quando um visitante
-chega em https://<nome>.onemapasos.oficeal.com, o Render entrega o pedido para o PC,
-o PC responde e o Render devolve ao visitante.
+O Render só passa dados ao Supabase:
+  - registro dos nomes (quem é dono de qual site);
+  - endereço atual do PC (o IP muda): o PC manda um sinal a cada 5 minutos, o que também
+    mantém o Render acordado; nesse sinal o Render testa se a porta do PC está aberta de fora;
+  - cópia dos arquivos (backup no Supabase Storage).
 
-Endereço público de um site:
-    https://<nome>.<DOMINIO_SITES>/?sistema=onemapasoficealOS&site=true&load=em-espera
-      load=em-espera  -> página de espera enquanto conecta no PC do dono
-      load=conectado  -> o site em si (vem do PC; se o PC estiver desligado, vem da cópia no Supabase)
+O link com nome (https://<nome>.<DOMINIO_SITES>/ ou /_site/<nome>/) só REDIRECIONA para o PC.
 
 Banco: Supabase (tabela public.sites = quem é dono de qual nome; bucket "sites" = cópia dos arquivos).
 Variáveis: SUPABASE_URL e SUPABASE_SECRET_KEY (ou SUPABASE_SERVICE_ROLE_KEY). Sem elas, usa o disco (só para teste).
@@ -30,18 +27,17 @@ Rotas:
   PUT    /api/copia/<nome>?caminho=index.html  corpo = arquivo (header X-Dono-Chave)
   DELETE /api/copia/<nome>?caminho=index.html                 (header X-Dono-Chave)
   GET  /api/manifest  /api/novidades
-  GET  /_tunel/esperar          o PC busca o próximo pedido   (header X-Dono-Chave)
-  POST /_tunel/responder/<id>   o PC devolve a resposta       (header X-Dono-Chave)
+  POST /api/pc/batida          {porta}  sinal de 5 em 5 min: atualiza o endereço do PC (header X-Dono-Chave)
+  GET  /api/meu-ip             IP público de quem pergunta
 
 Só usa a biblioteca padrão do Python.
 """
-import base64
 import hashlib
 import hmac
 import json
 import mimetypes
 import os
-import queue
+import ipaddress
 import re
 import sys
 import threading
@@ -49,7 +45,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
+import socket
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -61,24 +57,15 @@ DOMINIO_SITES = os.environ.get("ONEMAPAS_DOMINIO_SITES", "onemapasos.oficeal.com
 REPO = os.environ.get("GITHUB_REPO", "one-mapas-officeal/One-mapas-oficeal-OS-office")
 BRANCH = os.environ.get("GITHUB_BRANCH", "main")
 TOKEN = os.environ.get("GITHUB_TOKEN", "")  # opcional: só para ler ISO/manifest.json se o repositório for privado
-VERSAO = "0.4.0"
+VERSAO = "0.5.0"
 
 PARAMS_SITE = "sistema=onemapasoficealOS&site=true"
 NOME_VALIDO = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 RESERVADOS = {"api", "iso", "admin", "www", "assets", "static", "index", "sites", "os", "login", "mail",
               "smtp", "ftp", "ns1", "ns2", "status", "render", "app", "painel", "suporte", "onemapas"}
-TEMPO_POLL = 20            # segundos que o PC fica esperando um pedido
-TEMPO_RESPOSTA = 30        # segundos que o visitante espera o PC responder
-PC_ONLINE_SE = TEMPO_POLL + 10  # PC online se ABRIU uma busca nos últimos N segundos
-MAX_CORPO_PEDIDO = 2 * 1024 * 1024
-MAX_CORPO_RESPOSTA = 15 * 1024 * 1024
+PC_ONLINE_SE = 12 * 60     # PC "ligado" se mandou sinal nos últimos 12 min (ele manda a cada 5)
 MAX_SITES_POR_DONO = 20
 MAX_REGISTROS_POR_IP_HORA = 10
-CABECALHOS_PEDIDO = {"accept", "accept-language", "content-type", "cookie", "user-agent", "referer",
-                     "if-none-match", "if-modified-since", "range", "authorization", "origin"}
-CABECALHOS_RESPOSTA = {"content-type", "cache-control", "etag", "last-modified", "location", "set-cookie",
-                       "content-language", "content-disposition", "content-range", "accept-ranges", "expires",
-                       "vary", "content-security-policy", "x-frame-options", "access-control-allow-origin"}
 
 
 def agora():
@@ -158,7 +145,7 @@ class Supabase:
         return urllib.parse.quote(nome, safe="")
 
     def listar(self):
-        st, c = http(f"{SUPABASE_URL}/rest/v1/sites?select=nome,dono_hash,dono_nome,criado_em,copia_em",
+        st, c = http(f"{SUPABASE_URL}/rest/v1/sites?select=nome,dono_hash,dono_nome,criado_em,copia_em,pc_endereco,visto_em,porta_aberta",
                      cabecalhos=self._h())
         if st != 200:
             raise RuntimeError(f"Supabase listar: HTTP {st} {c[:200]!r}")
@@ -180,6 +167,13 @@ class Supabase:
         http(f"{SUPABASE_URL}/rest/v1/sites?nome=eq.{self._q(nome)}", "PATCH",
              json.dumps({"copia_em": quando}).encode(),
              self._h({"Content-Type": "application/json", "Prefer": "return=minimal"}))
+
+    def batida(self, dono_hash, endereco, aberta, quando):
+        st, c = http(f"{SUPABASE_URL}/rest/v1/sites?dono_hash=eq.{self._q(dono_hash)}", "PATCH",
+                     json.dumps({"pc_endereco": endereco, "porta_aberta": aberta, "visto_em": quando}).encode(),
+                     self._h({"Content-Type": "application/json", "Prefer": "return=minimal"}))
+        if st not in (200, 204):
+            raise RuntimeError(f"Supabase batida: HTTP {st} {c[:200]!r}")
 
     def salvar_arquivo(self, nome, caminho, corpo, tipo):
         st, c = http(f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{nome}/{urllib.parse.quote(caminho)}", "POST", corpo,
@@ -249,6 +243,13 @@ class Local:
             d = json.loads(self._r(nome).read_text("utf-8"))
             d["copia_em"] = quando
             self._r(nome).write_text(json.dumps(d), "utf-8")
+
+    def batida(self, dono_hash, endereco, aberta, quando):
+        for f in (DADOS_LOCAIS / "registro").glob("*.json"):
+            d = json.loads(f.read_text("utf-8"))
+            if d["dono_hash"] == dono_hash:
+                d.update(pc_endereco=endereco, porta_aberta=aberta, visto_em=quando)
+                f.write_text(json.dumps(d), "utf-8")
 
     def salvar_arquivo(self, nome, caminho, corpo, tipo):
         p = DADOS_LOCAIS / "copias" / nome / caminho
@@ -343,79 +344,64 @@ def dono_de(nome, chave):
     return bool(d and chave_valida(chave) and hmac.compare_digest(d["dono_hash"], hash_chave(chave)))
 
 
-def ler_da_copia(nome, caminho):
-    """Procura o arquivo na cópia (Supabase Storage). Devolve (status, tipo, corpo) ou None."""
-    rel = urllib.parse.unquote(caminho or "/").lstrip("/")
-    tentativas = [rel + "index.html"] if rel == "" or rel.endswith("/") else [rel, rel + "/index.html"]
-    for c in tentativas:
-        if caminho_ok(c):
-            r = banco.ler_arquivo(nome, c)
-            if r:
-                tipo = r[1] if r[1] and r[1] != "application/octet-stream" else (mimetypes.guess_type(c)[0] or "application/octet-stream")
-                return 200, tipo, r[0]
-    r = banco.ler_arquivo(nome, "404.html")
-    if r:
-        return 404, "text/html; charset=utf-8", r[0]
-    return None
+def pc_ligado(d):
+    v = d.get("visto_em")
+    if not v:
+        return False
+    try:
+        t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (datetime.now(timezone.utc) - t).total_seconds() < PC_ONLINE_SE
 
 
-# ------------------------------------------------------------------ túnel (PC <-> Render)
-class Tunel:
-    def __init__(self):
-        self.filas = {}        # dono_hash -> Queue de pedidos
-        self.ultimo_poll = {}  # dono_hash -> time
-        self.pendentes = {}    # id -> {"dono": hash, "evento": Event, "resposta": dict|None}
-        self.trava = threading.Lock()
-
-    def fila(self, dono):
-        with self.trava:
-            return self.filas.setdefault(dono, queue.Queue())
-
-    def online(self, dono):
-        return time.time() - self.ultimo_poll.get(dono, 0) < PC_ONLINE_SE
-
-    def pedir(self, dono, pedido):
-        """Chamado quando um visitante acessa o site: entrega ao PC e espera a resposta."""
-        pid = uuid.uuid4().hex
-        item = {"dono": dono, "evento": threading.Event(), "resposta": None, "expira": time.time() + TEMPO_RESPOSTA}
-        self.pendentes[pid] = item
-        self.fila(dono).put({"id": pid, **pedido})
-        item["evento"].wait(TEMPO_RESPOSTA)
-        self.pendentes.pop(pid, None)
-        return item["resposta"]
-
-    def esperar(self, dono):
-        """Chamado pelo PC: devolve o próximo pedido (ou None depois de TEMPO_POLL)."""
-        self.ultimo_poll[dono] = time.time()
-        fim = time.time() + TEMPO_POLL
-        q = self.fila(dono)
-        while True:
-            restante = fim - time.time()
-            if restante <= 0:
-                return None
-            try:
-                ped = q.get(timeout=restante)
-            except queue.Empty:
-                return None
-            p = self.pendentes.get(ped["id"])
-            if p and p["expira"] > time.time():  # pula pedidos cujo visitante já desistiu
-                return ped
-
-    def devolver(self, dono, ped):
-        """O PC caiu antes de receber o pedido: volta para a fila (outro trabalhador do PC pega)."""
-        if ped["id"] in self.pendentes:
-            self.fila(dono).put(ped)
-
-    def responder(self, dono, pid, resposta):
-        p = self.pendentes.get(pid)
-        if not p or not hmac.compare_digest(p["dono"], dono):
-            return False
-        p["resposta"] = resposta
-        p["evento"].set()
-        return True
+def link_do_site(d):
+    return f"{d['pc_endereco']}/{d['nome']}/" if d.get("pc_endereco") else None
 
 
-tunel = Tunel()
+def ip_publico(ip):
+    if os.environ.get("ONEMAPAS_TESTE_IP_PRIVADO") == "1":  # só para testar na mesma máquina
+        return bool(re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", ip or ""))
+    try:
+        return ipaddress.ip_address(ip).version == 4 and ipaddress.ip_address(ip).is_global
+    except ValueError:
+        return False
+
+
+def testar_porta(ip, porta):
+    """O Render tenta abrir http://IP:porta/ do PC (só o IP de quem pediu): a porta está aberta de fora?"""
+    try:
+        with socket.create_connection((ip, porta), timeout=5) as s:
+            s.settimeout(5)
+            s.sendall(b"HEAD /_onemapas HTTP/1.0\r\nHost: onemapas\r\n\r\n")
+            return s.recv(64).startswith(b"HTTP/")
+    except OSError:
+        return False
+
+
+def batida(chave, porta, ip):
+    """Sinal do PC (a cada 5 min): grava o endereço atual do PC em todos os sites dele."""
+    if not chave_valida(chave):
+        return 400, {"mensagem": "Chave do PC inválida."}
+    if not isinstance(porta, int) or not 1 <= porta <= 65535:
+        return 400, {"mensagem": "Porta inválida."}
+    h = hash_chave(chave)
+    meus = [d for d in registro.values() if d["dono_hash"] == h]
+    publico = ip_publico(ip)
+    aberta = testar_porta(ip, porta) if publico else False
+    endereco = f"http://{ip}:{porta}" if publico else None
+    quando = agora()
+    if meus:
+        try:
+            banco.batida(h, endereco, aberta, quando)
+        except Exception as e:
+            estado_banco["ultimo_erro"] = f"{agora()} {e}"
+            return 503, {"mensagem": "Banco de dados indisponível."}
+        with trava_registro:
+            for d in meus:
+                d.update(pc_endereco=endereco, porta_aberta=aberta, visto_em=quando)
+    return 200, {"ip_publico": ip, "ip_e_publico": publico, "porta": porta, "porta_aberta": aberta,
+                 "endereco": endereco, "sites": [{"nome": d["nome"], "link": link_do_site(d)} for d in meus]}
 
 
 # ------------------------------------------------------------------ páginas do gateway
@@ -436,29 +422,10 @@ button,.btn{{padding:10px 16px;border-radius:8px;border:0;background:#fff;color:
 </style></head><body><div class="c">{corpo_html}</div></body></html>"""
 
 
-def pagina_espera(nome, base):
-    return pagina(f"{nome} · OneMapas", f"""
-<h1 id="t">Conectando…</h1><div class="giro" id="g"></div>
-<p id="m">Ligando você ao PC onde o site <b>{nome}</b> está rodando.</p>
-<p class="mudo">Cliente → Render → PC do dono</p>
-<script>
-const base={json.dumps(base)}, alvo=base+"/?{PARAMS_SITE}&load=conectado";
-let n=0;
-async function tenta(){{
-  try{{const r=await fetch(base+"/_onemapas/estado",{{cache:"no-store"}});const d=await r.json();
-    if(d.online||d.copia){{location.replace(alvo);return;}}}}catch(e){{}}
-  if(++n===15){{document.getElementById("t").textContent="O PC do dono está desligado";
-    document.getElementById("m").innerHTML="Este site roda no computador do dono, e ele não está conectado agora.<br>Esta página continua tentando sozinha.";}}
-  setTimeout(tenta, n<15?2000:10000);
-}}
-tenta();
-</script>""")
-
-
 def pagina_portal():
     return pagina("OneMapas OS", f"""
 <h1>OneMapas OS</h1>
-<p>Crie um site que roda no seu próprio PC e fica no ar em<br><b>{(URL_BASE.replace("https://", "") + "/_site/&lt;nome&gt;") if URL_BASE else "&lt;nome&gt;." + DOMINIO_SITES}</b></p>
+<p>Crie um site que roda no seu próprio PC.<br>O visitante abre direto no PC: <b>http://IP-do-PC:8090/&lt;nome&gt;/</b></p>
 <div class="linha"><input id="n" placeholder="nome do site" maxlength="63"><button id="b">Está disponível?</button></div>
 <p id="r"></p>
 <p class="mudo">Para criar o site, instale o OneMapas OS no PC (ISO) ou rode <code>onemapas_pc.py</code>.</p>
@@ -467,7 +434,7 @@ def pagina_portal():
 const n=document.getElementById("n"),r=document.getElementById("r");
 n.oninput=()=>{{n.value=n.value.toLowerCase().replace(/[^a-z0-9-]/g,"");r.textContent=""}};
 async function v(){{if(!n.value)return;const d=await (await fetch("/api/verificar?nome="+encodeURIComponent(n.value))).json();
- r.innerHTML=d.disponivel?"✅ SIM: "+d.url.split("/?")[0]+" está disponível!":"❌ NÃO: Escolha outra URL";}}
+ r.innerHTML=d.disponivel?"✅ SIM: o nome "+d.nome+" está disponível!":"❌ NÃO: Escolha outra URL";}}
 document.getElementById("b").onclick=v;n.onkeydown=e=>{{if(e.key==="Enter")v()}};
 fetch("/api/manifest").then(r=>r.json()).then(m=>{{const i=(m.isos||[]).find(x=>x.download);if(i){{const a=document.getElementById("iso");a.href=i.download;a.hidden=false;a.textContent="⬇ Baixar a ISO "+i.versao+" ("+i.canal+")"}}}}).catch(()=>{{}});
 </script>""")
@@ -550,7 +517,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.html(200, pagina_portal())
         if u.path == "/api/status":
             return self.json(200, {"ok": True, "versao": VERSAO, "dominio_sites": DOMINIO_SITES, "url_base": URL_BASE, "sites": len(registro),
-                                   "pcs_online": sum(1 for d in set(x["dono_hash"] for x in registro.values()) if tunel.online(d)),
+                                   "pcs_online": len({x["dono_hash"] for x in registro.values() if pc_ligado(x)}),
                                    "banco": estado_banco})
         if u.path == "/api/verificar":
             return self.json(200, verificar(q.get("nome", [""])[0]))
@@ -562,9 +529,16 @@ class Handler(BaseHTTPRequestHandler):
             if not chave_valida(chave):
                 return self.json(400, {"mensagem": "Chave inválida."})
             h = hash_chave(chave)
-            return self.json(200, {"sites": [{"nome": n, "url": url_site(n), "criado_em": d["criado_em"]}
-                                             for n, d in sorted(registro.items()) if d["dono_hash"] == h],
-                                   "online": tunel.online(h)})
+            return self.json(200, {"sites": [{"nome": n, "url": url_site(n), "link": link_do_site(d), "criado_em": d["criado_em"]}
+                                             for n, d in sorted(registro.items()) if d["dono_hash"] == h]})
+        if u.path == "/api/meu-ip":
+            return self.json(200, {"ip": self.ip(), "publico": ip_publico(self.ip())})
+        if u.path == "/api/pc/batida" and self.command == "POST":
+            try:
+                d = json.loads(self.ler_corpo(10_000) or b"{}")
+            except Exception:
+                d = {}
+            return self.json(*batida(chave, d.get("porta"), self.ip()))
         if u.path == "/api/registrar" and self.command == "POST":
             corpo = self.ler_corpo(10_000)
             try:
@@ -606,96 +580,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(502, {"mensagem": str(e)[:200]})
             return self.json(200, {"ok": True})
 
-        # ---- túnel
-        if u.path == "/_tunel/esperar" and self.command == "GET":
-            if not chave_valida(chave):
-                return self.json(401, {"mensagem": "Chave inválida."})
-            dono = hash_chave(chave)
-            ped = tunel.esperar(dono)
-            if ped is None:
-                return self.responder_bruto(204, b"", "text/plain")
-            try:
-                return self.json(200, ped)
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                tunel.devolver(dono, ped)
-        m = re.fullmatch(r"/_tunel/responder/([0-9a-f]{32})", u.path)
-        if m and self.command == "POST":
-            if not chave_valida(chave):
-                return self.json(401, {"mensagem": "Chave inválida."})
-            corpo = self.ler_corpo(MAX_CORPO_RESPOSTA * 2)
-            if corpo is None:
-                return self.json(413, {"mensagem": "Resposta grande demais."})
-            try:
-                resp = json.loads(corpo)
-            except Exception:
-                return self.json(400, {"mensagem": "JSON inválido."})
-            ok = tunel.responder(hash_chave(chave), m.group(1), resp)
-            return self.json(200 if ok else 410, {"ok": ok})
-
         return self.html(404, pagina("Não encontrado", "<h1>404</h1><p>Página não encontrada.</p>"))
 
     def servir_site(self, nome, prefixo, caminho, query):
+        """O Render não entrega o site: só manda o visitante para o PC do dono."""
         d = registro.get(nome)
         if not d:
             return self.html(404, pagina("Site não existe", f"<h1>{nome}</h1><p>Esse site ainda não existe.</p>"
                                          f"<p class='mudo'>O nome está livre: crie com o OneMapas OS.</p>"))
-        base = f"{prefixo}" if prefixo else ""
-        q = urllib.parse.parse_qs(query)
-        load = q.get("load", [""])[0]
-        online = tunel.online(d["dono_hash"])
-        tem_copia = bool(d.get("copia_em"))
-
+        link = link_do_site(d)
         if caminho == "/_onemapas/estado":
-            return self.json(200, {"site": nome, "online": online, "copia": tem_copia})
-        # a página inicial sempre passa pela tela de espera primeiro
-        if caminho in ("", "/") and self.command in ("GET", "HEAD"):
-            if load != "conectado" or not (online or tem_copia):
-                if load != "em-espera" or q.get("sistema", [""])[0] != "onemapasoficealOS":
-                    return self.redirecionar(f"{base}/?{PARAMS_SITE}&load=em-espera")
-                return self.html(200, pagina_espera(nome, base))
-        if not online and tem_copia and self.command in ("GET", "HEAD"):
-            r = ler_da_copia(nome, caminho)
-            if r:
-                st, tipo, corpo = r
-                if tipo.startswith("text/") and "charset" not in tipo:
-                    tipo += "; charset=utf-8"
-                return self.responder_bruto(st, corpo, tipo, {"Cache-Control": "no-cache", "X-OneMapas-Site": nome,
-                                                             "X-OneMapas-Origem": "copia-supabase"})
-            return self.html(404, pagina("Não encontrado", f"<h1>404</h1><p>Página não encontrada em {nome}.</p>"))
-        if not online:
-            return self.html(503, pagina("PC desligado", f"<h1>{nome}</h1><p>O PC do dono está desligado agora.</p>"
-                                         f"<p><a class='btn' href='{base}/?{PARAMS_SITE}&load=em-espera'>Tentar de novo</a></p>"),
-                             {"Retry-After": "10"})
-
-        corpo = self.ler_corpo(MAX_CORPO_PEDIDO)
-        if corpo is None:
-            return self.html(413, pagina("Muito grande", "<h1>413</h1><p>Envio grande demais.</p>"))
-        pedido = {
-            "site": nome, "metodo": self.command,
-            "caminho": (caminho or "/") + (f"?{query}" if query else ""),
-            "cabecalhos": {k: v for k, v in self.headers.items() if k.lower() in CABECALHOS_PEDIDO},
-            "ip": self.ip(), "corpo_b64": base64.b64encode(corpo).decode(),
-        }
-        resp = tunel.pedir(d["dono_hash"], pedido)
-        if not resp:
-            return self.html(504, pagina("Sem resposta", f"<h1>{nome}</h1><p>O PC do dono não respondeu a tempo.</p>"))
-        try:
-            corpo_resp = base64.b64decode(resp.get("corpo_b64", ""))[:MAX_CORPO_RESPOSTA]
-            status = int(resp.get("status", 200))
-            if not 100 <= status <= 599:
-                status = 502
-        except Exception:
-            return self.html(502, pagina("Erro", "<h1>502</h1><p>Resposta inválida do PC.</p>"))
-        extra = {}
-        for k, v in (resp.get("cabecalhos") or {}).items():
-            if k.lower() in CABECALHOS_RESPOSTA and "\n" not in str(v) and "\r" not in str(v):
-                if k.lower() == "location" and prefixo and str(v).startswith("/"):
-                    v = prefixo + v
-                extra[k] = str(v)
-        tipo = extra.pop("Content-Type", None) or extra.pop("content-type", None) or "application/octet-stream"
-        extra["X-OneMapas-Site"] = nome
-        extra["X-OneMapas-Origem"] = "pc"
-        self.responder_bruto(status, corpo_resp, tipo, extra)
+            return self.json(200, {"site": nome, "online": pc_ligado(d), "link": link, "porta_aberta": d.get("porta_aberta")})
+        if link and pc_ligado(d):
+            resto = (caminho or "/").lstrip("/")
+            return self.redirecionar(link + resto + (f"?{query}" if query else ""))
+        motivo = ("O PC do dono não mandou sinal nos últimos minutos (desligado ou sem internet)."
+                  if not pc_ligado(d) else "O PC do dono ainda não tem um endereço público.")
+        return self.html(503, pagina("PC desligado", f"<h1>{nome}</h1><p>Este site roda direto no computador do dono.</p>"
+                                     f"<p>{motivo}</p><p class='mudo'>Tente de novo mais tarde.</p>"), {"Retry-After": "300"})
 
     do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = tratar
 
